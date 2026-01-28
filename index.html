@@ -3,8 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FillMaster Assist - Live DB</title>
+    <meta name="theme-color" content="#0f172a">
+    <meta name="description" content="FillMaster Assist Operator Tool">
+    <title>FillMaster Assist - PWA</title>
     
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/1048/1048953.png">
+
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -17,12 +22,10 @@
         .glass-panel { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
-        
-        @keyframes popIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-        .animate-pop-in { animation: popIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
-
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .animate-spin-slow { animation: spin 1.5s linear infinite; }
+        @keyframes popIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        .animate-pop-in { animation: popIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
     </style>
 </head>
 <body>
@@ -32,11 +35,12 @@
         const { useState, useEffect, useMemo, useRef } = React;
 
         // --- KONFIGURÁCIÓ ---
-        // A Google Apps Script Web App URL-je:
         const API_URL = "https://script.google.com/macros/s/AKfycby7frvjPvAh5NoPubgPxkDTkuTZouIBLHE1TABnqBx3LL_CC7-jpwxrwzDFlC473zr3/exec";
+        const SHEET_URL = "https://docs.google.com/spreadsheets/d/1S6W9Cg3pYv2WqXFk8WzT_R8yXhG-CjF_z_QeQok_wXg/edit"; 
         
-        // A Google Sheet címe (szerkesztéshez):
-        const SHEET_URL = "https://docs.google.com/spreadsheets/d/1w7r3cFVEZiEjb6pKovDfe3ydxxDFGz_a-xA3x-kmhF4/edit?gid=553395989#gid=553395989"; // Ide írd be a saját Sheeted linkjét, ha más!
+        // Cache beállítások
+        const CACHE_KEY = 'fillmaster_db_data';
+        const CACHE_TIME = 'fillmaster_db_time';
 
         // --- ICONS ---
         const Icons = {
@@ -44,244 +48,171 @@
             Refresh: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>,
             Edit: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>,
             Droplet: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path></svg>,
-            Trash: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>,
             Alert: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>,
             Scan: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><rect x="7" y="7" width="10" height="10"></rect></svg>,
             Close: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>,
-            Loader: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+            Loader: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>,
+            WifiOff: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"></path><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"></path><path d="M10.71 5.05A16 16 0 0 1 22.58 9"></path><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg>
         };
 
-        // --- COMPONENT: BarcodeModal ---
         const BarcodeModal = ({ isOpen, onClose, code, title }) => {
             const canvasRef = useRef(null);
-            const [error, setError] = useState(null);
-
             useEffect(() => {
-                if (isOpen) setError(null);
                 if (isOpen && code && canvasRef.current) {
                     const timer = setTimeout(() => {
                         try {
-                            if (typeof bwipjs === 'undefined') {
-                                throw new Error("Barcode library not loaded");
-                            }
+                            if (typeof bwipjs === 'undefined') throw new Error("Barcode lib missing");
                             bwipjs.toCanvas(canvasRef.current, {
-                                bcid:        'datamatrix',       
-                                text:        code.toString(),    
-                                scale:       3,                  
-                                height:      20,                 
-                                width:       20,
-                                padding:     10,
-                                backgroundcolor: 'ffffff'
+                                bcid: 'datamatrix', text: code.toString(), scale: 3, height: 20, width: 20, padding: 10, backgroundcolor: 'ffffff'
                             });
-                        } catch (e) {
-                            console.error("Barcode generation failed", e);
-                            setError("Could not generate barcode.");
-                        }
+                        } catch (e) { console.error(e); }
                     }, 50); 
                     return () => clearTimeout(timer);
                 }
             }, [isOpen, code]);
-
             if (!isOpen) return null;
-
             return (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in" onClick={onClose}>
-                    <div className="bg-white text-slate-900 rounded-2xl shadow-2xl w-full max-w-sm flex flex-col items-center overflow-hidden animate-pop-in relative" onClick={e => e.stopPropagation()}>
+                    <div className="bg-white text-slate-900 rounded-2xl shadow-2xl w-full max-w-sm flex flex-col items-center animate-pop-in" onClick={e => e.stopPropagation()}>
                         <div className="w-full p-4 bg-slate-100 border-b flex justify-between items-center">
                             <h3 className="font-bold text-lg text-slate-700">{title}</h3>
-                            <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
-                                <Icons.Close />
-                            </button>
+                            <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full"><Icons.Close /></button>
                         </div>
                         <div className="p-8 flex flex-col items-center gap-4 min-h-[250px] justify-center">
-                            {error ? (
-                                <div className="text-red-500 font-bold">{error}</div>
-                            ) : (
-                                <div className="bg-white p-2 border-2 border-slate-900 rounded-lg shadow-inner">
-                                    <canvas ref={canvasRef} className="max-w-full"></canvas>
-                                </div>
-                            )}
-                            <div className="text-center">
-                                <p className="text-sm text-slate-400 uppercase tracking-wide">Scannable ID</p>
-                                <p className="text-3xl font-mono font-bold text-slate-800 tracking-wider">{code}</p>
-                            </div>
-                        </div>
-                        <div className="w-full p-4 bg-slate-50 text-center text-xs text-slate-400">
-                            DataMatrix Format (ECC200)
+                            <div className="bg-white p-2 border-2 border-slate-900 rounded-lg shadow-inner"><canvas ref={canvasRef} className="max-w-full"></canvas></div>
+                            <div className="text-center"><p className="text-sm text-slate-400 uppercase">Scannable ID</p><p className="text-3xl font-mono font-bold text-slate-800">{code}</p></div>
                         </div>
                     </div>
                 </div>
             );
         };
 
-        // --- COMPONENT: BottleGraphic ---
         const BottleGraphic = ({ variant }) => {
             const v = variant ? variant.toLowerCase() : "";
             const isVial = v.includes('vial');
             const isGlass = v.includes('glass');
-            
-            let pathClass = "fill-slate-700 stroke-slate-400"; 
-            if (isVial) pathClass = "fill-teal-900/30 stroke-teal-400";
-            else if (isGlass) pathClass = "fill-blue-200/10 stroke-blue-300";
-            else pathClass = "fill-slate-600 stroke-slate-400"; 
-
-            if (isVial) {
-                return (
-                    <svg width="24" height="42" viewBox="0 0 24 42" className="drop-shadow-lg">
-                        <path d="M8 2 h8 v4 h-8 z" className="fill-slate-500 stroke-slate-300" strokeWidth="1"/>
-                        <path d="M9 6 v30 a3 3 0 0 0 6 0 v-30" className={pathClass} strokeWidth="2"/>
-                        <line x1="9" y1="14" x2="15" y2="14" stroke="currentColor" className="opacity-30" />
-                        <line x1="9" y1="22" x2="15" y2="22" stroke="currentColor" className="opacity-30" />
-                    </svg>
-                );
-            }
-            return (
-                <svg width="32" height="42" viewBox="0 0 32 42" className="drop-shadow-lg">
-                    <rect x="11" y="2" width="10" height="5" rx="1" className="fill-slate-500 stroke-slate-300" strokeWidth="1"/>
-                    <path d="M7 10 h18 v26 a3 3 0 0 1 -3 3 h-12 a3 3 0 0 1 -3 -3 v-26 z" className={pathClass} strokeWidth="2"/>
-                    <path d="M11 7 h10 l-4 3 h-2 z" className="fill-slate-600" />
-                    <line x1="20" y1="20" x2="24" y2="20" stroke="currentColor" className="opacity-40" />
-                    <line x1="20" y1="26" x2="24" y2="26" stroke="currentColor" className="opacity-40" />
-                    <line x1="20" y1="32" x2="24" y2="32" stroke="currentColor" className="opacity-40" />
-                </svg>
-            );
+            let pathClass = isVial ? "fill-teal-900/30 stroke-teal-400" : isGlass ? "fill-blue-200/10 stroke-blue-300" : "fill-slate-600 stroke-slate-400";
+            if (isVial) return (<svg width="24" height="42" viewBox="0 0 24 42" className="drop-shadow-lg"><path d="M8 2 h8 v4 h-8 z" className="fill-slate-500 stroke-slate-300"/><path d="M9 6 v30 a3 3 0 0 0 6 0 v-30" className={pathClass} strokeWidth="2"/><line x1="9" y1="14" x2="15" y2="14" stroke="currentColor" className="opacity-30"/><line x1="9" y1="22" x2="15" y2="22" stroke="currentColor" className="opacity-30"/></svg>);
+            return (<svg width="32" height="42" viewBox="0 0 32 42" className="drop-shadow-lg"><rect x="11" y="2" width="10" height="5" rx="1" className="fill-slate-500 stroke-slate-300"/><path d="M7 10 h18 v26 a3 3 0 0 1 -3 3 h-12 a3 3 0 0 1 -3 -3 v-26 z" className={pathClass} strokeWidth="2"/><path d="M11 7 h10 l-4 3 h-2 z" className="fill-slate-600"/><line x1="20" y1="20" x2="24" y2="20" stroke="currentColor" className="opacity-40"/><line x1="20" y1="26" x2="24" y2="26" stroke="currentColor" className="opacity-40"/><line x1="20" y1="32" x2="24" y2="32" stroke="currentColor" className="opacity-40"/></svg>);
         };
 
-        const getColorStyle = (colorName) => {
-            const name = colorName ? colorName.toLowerCase() : "";
-            if (name.includes('red')) return 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.6)]';
-            if (name.includes('blue')) return 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.6)]';
-            if (name.includes('green')) return 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.6)]';
-            if (name.includes('white')) return 'bg-slate-100 border-2 border-slate-300 text-slate-800';
-            if (name.includes('transparent')) return 'bg-slate-700 border-2 border-dashed border-slate-400';
+        const getColorStyle = (name) => {
+            const n = name ? name.toLowerCase() : "";
+            if (n.includes('red')) return 'bg-red-500 shadow-red-500/50';
+            if (n.includes('blue')) return 'bg-blue-500 shadow-blue-500/50';
+            if (n.includes('green')) return 'bg-green-500 shadow-green-500/50';
+            if (n.includes('white')) return 'bg-slate-100 border-2 border-slate-300 text-slate-800';
             return 'bg-gray-500';
         };
 
-        // --- COMPONENT: ProductCard ---
-        const ProductCard = ({ item, onShowBarcode }) => {
-            const colorClass = getColorStyle(item['Deckel farbe']);
-            return (
-                <div className="glass-panel p-5 rounded-xl flex flex-col gap-3 animate-fade-in hover:scale-[1.01] transition-transform duration-200 shadow-xl border-l-4 border-l-blue-500">
-                    <div className="flex justify-between items-start">
-                        <div>
-                            <span className="text-xs text-slate-400 uppercase tracking-wider">{item.Productline}</span>
-                            <h3 className="text-xl font-bold text-white leading-tight">{item.Product}</h3>
-                            <div className="text-2xl font-mono text-yellow-400 mt-1">FUP: {item['FUP No']}</div>
-                        </div>
-                        <div className="flex flex-col items-center bg-slate-800 p-2 rounded-lg border border-slate-700">
-                            <span className="text-xs text-slate-400">Machine</span>
-                            <span className="text-2xl font-bold text-white">{item['Machine No']}</span>
-                        </div>
+        const ProductCard = ({ item, onShowBarcode }) => (
+            <div className="glass-panel p-5 rounded-xl flex flex-col gap-3 animate-fade-in hover:scale-[1.01] transition-transform shadow-xl border-l-4 border-l-blue-500">
+                <div className="flex justify-between items-start">
+                    <div>
+                        <span className="text-xs text-slate-400 uppercase tracking-wider">{item.Productline}</span>
+                        <h3 className="text-xl font-bold text-white leading-tight">{item.Product}</h3>
+                        <div className="text-2xl font-mono text-yellow-400 mt-1">FUP: {item['FUP No']}</div>
                     </div>
-                    <div className="grid grid-cols-2 gap-3 mt-2">
-                        
-                        {/* Cap Info */}
-                        <div 
-                            className="bg-slate-800/50 p-3 rounded-lg flex items-center gap-3 border border-slate-700 cursor-pointer hover:bg-slate-800 hover:border-blue-400 transition-all group relative"
-                            onClick={() => onShowBarcode(item['Deckel Artikel'], `Cap Article (${item['Deckel farbe']})`)}
-                            title="Click to show Barcode"
-                        >
-                            <div className="absolute top-2 right-2 text-slate-600 group-hover:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity"><Icons.Scan /></div>
-                            <div className={`w-10 h-10 rounded-full flex-shrink-0 ${colorClass}`} title={item['Deckel farbe']}></div>
-                            <div className="overflow-hidden">
-                                <div className="text-xs text-slate-400">Cap ({item['Deckel farbe']})</div>
-                                <div className="flex items-center gap-1">
-                                    <span className="font-mono text-sm truncate font-bold underline decoration-dotted underline-offset-2 decoration-slate-500">{item['Deckel Artikel']}</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Filling Volume */}
-                        <div className="bg-blue-900/20 p-3 rounded-lg flex items-center gap-3 border border-blue-500/30">
-                            <div className="text-blue-400"><Icons.Droplet /></div>
-                            <div>
-                                <div className="text-xs text-blue-300">Filling Volume</div>
-                                <div className="text-lg font-bold text-blue-100">{item['Filling volume (mL)']}</div>
-                            </div>
-                        </div>
-
-                         {/* Bottle Info */}
-                         <div 
-                            className="col-span-2 bg-slate-800/50 p-3 rounded-lg flex items-center gap-4 border border-slate-700 cursor-pointer hover:bg-slate-800 hover:border-blue-400 transition-all group relative"
-                            onClick={() => onShowBarcode(item['Flasche Artikel'], `Bottle Article (${item['Flasche variant']})`)}
-                            title="Click to show Barcode"
-                        >
-                            <div className="absolute top-2 right-2 text-slate-600 group-hover:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity"><Icons.Scan /></div>
-                            <div className="flex-shrink-0">
-                                <BottleGraphic variant={item['Flasche variant']} />
-                            </div>
-
-                            <div className="flex-grow">
-                                <div className="text-xs text-slate-400">Bottle ({item['Flasche variant']})</div>
-                                <div className="flex items-center gap-2">
-                                     <span className="font-mono text-xl text-white font-bold underline decoration-dotted underline-offset-4 decoration-slate-500">{item['Flasche Artikel']}</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div className="mt-auto pt-3 border-t border-slate-700 flex justify-between text-sm text-slate-400">
-                        <span>Format: <b className="text-white">{item['Machine Format']}</b></span>
+                    <div className="flex flex-col items-center bg-slate-800 p-2 rounded-lg border border-slate-700">
+                        <span className="text-xs text-slate-400">Machine</span>
+                        <span className="text-2xl font-bold text-white">{item['Machine No']}</span>
                     </div>
                 </div>
-            );
-        };
+                <div className="grid grid-cols-2 gap-3 mt-2">
+                    <div className="bg-slate-800/50 p-3 rounded-lg flex items-center gap-3 border border-slate-700 cursor-pointer hover:bg-slate-800 hover:border-blue-400 transition-all group relative" onClick={() => onShowBarcode(item['Deckel Artikel'], `Cap (${item['Deckel farbe']})`)}>
+                        <div className="absolute top-2 right-2 text-slate-600 group-hover:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity"><Icons.Scan /></div>
+                        <div className={`w-10 h-10 rounded-full flex-shrink-0 shadow-lg ${getColorStyle(item['Deckel farbe'])}`}></div>
+                        <div className="overflow-hidden">
+                            <div className="text-xs text-slate-400">Cap ({item['Deckel farbe']})</div>
+                            <span className="font-mono text-sm truncate font-bold underline decoration-dotted decoration-slate-500">{item['Deckel Artikel']}</span>
+                        </div>
+                    </div>
+                    <div className="bg-blue-900/20 p-3 rounded-lg flex items-center gap-3 border border-blue-500/30">
+                        <div className="text-blue-400"><Icons.Droplet /></div>
+                        <div><div className="text-xs text-blue-300">Filling Volume</div><div className="text-lg font-bold text-blue-100">{item['Filling volume (mL)']}</div></div>
+                    </div>
+                    <div className="col-span-2 bg-slate-800/50 p-3 rounded-lg flex items-center gap-4 border border-slate-700 cursor-pointer hover:bg-slate-800 hover:border-blue-400 transition-all group relative" onClick={() => onShowBarcode(item['Flasche Artikel'], `Bottle (${item['Flasche variant']})`)}>
+                        <div className="absolute top-2 right-2 text-slate-600 group-hover:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity"><Icons.Scan /></div>
+                        <div className="flex-shrink-0"><BottleGraphic variant={item['Flasche variant']} /></div>
+                        <div className="flex-grow">
+                            <div className="text-xs text-slate-400">Bottle ({item['Flasche variant']})</div>
+                            <span className="font-mono text-xl text-white font-bold underline decoration-dotted decoration-slate-500">{item['Flasche Artikel']}</span>
+                        </div>
+                    </div>
+                </div>
+                <div className="mt-auto pt-3 border-t border-slate-700 flex justify-between text-sm text-slate-400"><span>Format: <b className="text-white">{item['Machine Format']}</b></span></div>
+            </div>
+        );
 
-        // --- MAIN APP ---
         const App = () => {
             const [data, setData] = useState([]);
             const [isLoading, setIsLoading] = useState(true);
+            const [isOffline, setIsOffline] = useState(false);
             const [error, setError] = useState(null);
-            
             const [searchTerm, setSearchTerm] = useState("");
             const [machineFilter, setMachineFilter] = useState("all"); 
-            
             const [modalData, setModalData] = useState({ isOpen: false, code: null, title: "" });
 
-            const fetchData = async () => {
+            const fetchData = async (force = false) => {
                 setIsLoading(true);
                 setError(null);
+                
+                // 1. Próbáljuk betölteni a localStorage-ból
+                const cachedData = localStorage.getItem(CACHE_KEY);
+                
+                // Ha nincs net, vagy van cache és nem kényszerítettük a frissítést
+                if (!force && cachedData) {
+                    setData(JSON.parse(cachedData));
+                    if (!navigator.onLine) setIsOffline(true);
+                    setIsLoading(false);
+                    // A háttérben azért megpróbálhatunk frissíteni, ha van net
+                    if (navigator.onLine) fetchFromNet(); 
+                    return;
+                }
+
+                await fetchFromNet();
+            };
+
+            const fetchFromNet = async () => {
                 try {
                     const response = await fetch(API_URL);
-                    if (!response.ok) {
-                        throw new Error('Network response was not ok');
-                    }
+                    if (!response.ok) throw new Error('API Error');
                     const result = await response.json();
                     
                     if (Array.isArray(result)) {
                         setData(result);
-                    } else if (result.result === 'error') {
-                        throw new Error(result.message);
+                        localStorage.setItem(CACHE_KEY, JSON.stringify(result));
+                        localStorage.setItem(CACHE_TIME, new Date().toISOString());
+                        setIsOffline(false);
                     } else {
-                        setData([]);
-                        console.warn("Unexpected data format", result);
+                        throw new Error(result.message || "Invalid Data");
                     }
                 } catch (err) {
-                    console.error("Fetch error:", err);
-                    setError("Failed to load data from Google Sheets. Check connection.");
+                    console.error(err);
+                    setIsOffline(true);
+                    // Ha a hálózati kérés elhasal, de van régi adatunk, ne írjuk felül hibával
+                    const cachedData = localStorage.getItem(CACHE_KEY);
+                    if (cachedData) {
+                        setData(JSON.parse(cachedData));
+                    } else {
+                        setError("Offline - No data cached yet.");
+                    }
                 } finally {
                     setIsLoading(false);
                 }
-            };
+            }
 
             useEffect(() => {
                 fetchData();
+                window.addEventListener('online', () => setIsOffline(false));
+                window.addEventListener('offline', () => setIsOffline(true));
             }, []);
-            
-            const openBarcode = (code, title) => {
-                setModalData({ isOpen: true, code, title });
-            };
 
             const filteredData = useMemo(() => {
                 return data.filter(item => {
                     const term = searchTerm.toLowerCase();
-                    const matchesSearch = 
-                        (item['Product'] && item['Product'].toString().toLowerCase().includes(term)) || 
-                        (item['FUP No'] && item['FUP No'].toString().includes(term));
-                    
-                    const matchesMachine = 
-                        machineFilter === 'all' || 
-                        (item['Machine No'] && item['Machine No'].toString() === machineFilter);
-
+                    const matchesSearch = (item['Product'] && item['Product'].toString().toLowerCase().includes(term)) || (item['FUP No'] && item['FUP No'].toString().includes(term));
+                    const matchesMachine = machineFilter === 'all' || (item['Machine No'] && item['Machine No'].toString() === machineFilter);
                     return matchesSearch && matchesMachine;
                 });
             }, [data, searchTerm, machineFilter]);
@@ -289,113 +220,63 @@
             return (
                 <div className="min-h-screen p-4 sm:p-6 max-w-4xl mx-auto pb-20">
                     <header className="flex flex-col sm:flex-row gap-4 justify-between items-center mb-8">
-                        <div className="text-center sm:text-left">
-                            <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-teal-400">
-                                FillMaster <span className="text-white font-light">Assist</span>
-                            </h1>
-                            <p className="text-slate-400 text-sm">Live Google Sheet Database</p>
+                        <div>
+                            <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-teal-400">FillMaster <span className="text-white font-light">Assist</span></h1>
+                            <p className="text-slate-400 text-sm flex items-center gap-2">
+                                {isOffline ? <span className="text-yellow-500 flex items-center gap-1"><Icons.WifiOff /> Offline Mode</span> : "Live System"}
+                            </p>
                         </div>
-                        
                         <div className="flex gap-3">
-                            {/* GOOGLE SHEET LINK GOMB */}
-                            <a 
-                                href={SHEET_URL}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg transition-all shadow-lg border border-slate-600 no-underline"
-                            >
-                                <Icons.Edit />
-                                <span className="hidden sm:inline">Database</span>
-                            </a>
-
-                            {/* REFRESH GOMB */}
-                            <button 
-                                onClick={fetchData} 
-                                disabled={isLoading}
-                                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 text-white px-4 py-2 rounded-lg cursor-pointer transition-all shadow-lg"
-                            >
-                                <div className={isLoading ? "animate-spin-slow" : ""}>
-                                    {isLoading ? <Icons.Loader /> : <Icons.Refresh />}
-                                </div>
+                            <a href={SHEET_URL} target="_blank" className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg shadow-lg no-underline"><Icons.Edit /><span className="hidden sm:inline">Database</span></a>
+                            <button onClick={() => fetchData(true)} disabled={isLoading} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 text-white px-4 py-2 rounded-lg shadow-lg">
+                                <div className={isLoading ? "animate-spin-slow" : ""}>{isLoading ? <Icons.Loader /> : <Icons.Refresh />}</div>
                                 <span className="hidden sm:inline">{isLoading ? "Loading..." : "Refresh"}</span>
                             </button>
                         </div>
                     </header>
 
-                    {error && (
-                        <div className="bg-red-500/20 border border-red-500 text-red-200 p-4 rounded-lg mb-6 flex items-center gap-3 animate-fade-in">
-                            <Icons.Alert />
-                            <div>
-                                <b>Connection Error</b> 
-                                <p className="text-sm">{error}</p>
-                            </div>
-                        </div>
-                    )}
+                    {error && <div className="bg-red-500/20 border border-red-500 text-red-200 p-4 rounded-lg mb-6 flex items-center gap-3"><Icons.Alert /><div><b>Error</b><p className="text-sm">{error}</p></div></div>}
 
                     <div className="sticky top-4 z-10 glass-panel p-4 rounded-xl mb-6 shadow-2xl">
                         <div className="flex flex-col gap-4">
                             <div className="relative">
                                 <div className="absolute left-3 top-3.5 text-slate-400"><Icons.Search /></div>
-                                <input 
-                                    type="text" 
-                                    placeholder="Search by FUP or Name..." 
-                                    className="w-full bg-slate-900/80 border border-slate-600 rounded-lg py-3 pl-10 pr-4 text-white focus:outline-none focus:border-blue-500 placeholder-slate-500 text-lg"
-                                    value={searchTerm}
-                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                />
+                                <input type="text" placeholder="Search by FUP or Name..." className="w-full bg-slate-900/80 border border-slate-600 rounded-lg py-3 pl-10 pr-4 text-white focus:outline-none focus:border-blue-500 placeholder-slate-500 text-lg" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                             </div>
                             <div className="flex gap-2 overflow-x-auto pb-1">
-                                <button onClick={() => setMachineFilter('all')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors border ${machineFilter === 'all' ? 'bg-slate-700 border-slate-500 text-white' : 'bg-transparent border-slate-700 text-slate-400 hover:bg-slate-800'}`}>All Machines</button>
-                                <button onClick={() => setMachineFilter('1')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors border ${machineFilter === '1' ? 'bg-blue-900/40 border-blue-500 text-blue-200' : 'bg-transparent border-slate-700 text-slate-400 hover:bg-slate-800'}`}>Machine 1</button>
-                                <button onClick={() => setMachineFilter('2')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors border ${machineFilter === '2' ? 'bg-blue-900/40 border-blue-500 text-blue-200' : 'bg-transparent border-slate-700 text-slate-400 hover:bg-slate-800'}`}>Machine 2</button>
+                                {['all', '1', '2'].map(m => (
+                                    <button key={m} onClick={() => setMachineFilter(m)} className={`px-4 py-2 rounded-lg text-sm font-medium border ${machineFilter === m ? 'bg-blue-900/40 border-blue-500 text-blue-200' : 'bg-transparent border-slate-700 text-slate-400 hover:bg-slate-800'}`}>{m === 'all' ? 'All Machines' : `Machine ${m}`}</button>
+                                ))}
                             </div>
                         </div>
                     </div>
 
                     <div className="space-y-4">
-                        <div className="flex justify-between items-end px-2">
-                             <h2 className="text-slate-400 text-sm font-medium uppercase tracking-widest">
-                                Results: <span className="text-white">{filteredData.length}</span>
-                            </h2>
-                        </div>
-                        
+                         <h2 className="text-slate-400 text-sm font-medium uppercase tracking-widest px-2">Results: <span className="text-white">{filteredData.length}</span></h2>
                         {isLoading && filteredData.length === 0 ? (
-                             <div className="text-center py-20">
-                                <div className="mx-auto h-12 w-12 text-blue-400 mb-4 flex justify-center animate-spin-slow"><Icons.Loader /></div>
-                                <p className="text-slate-400">Synchronizing with Google Sheets...</p>
-                            </div>
+                             <div className="text-center py-20"><div className="mx-auto h-12 w-12 text-blue-400 mb-4 flex justify-center animate-spin-slow"><Icons.Loader /></div><p className="text-slate-400">Loading data...</p></div>
                         ) : filteredData.length > 0 ? (
-                            <div className="grid grid-cols-1 gap-6">
-                                {filteredData.map((item, index) => (
-                                    <ProductCard 
-                                        key={index} 
-                                        item={item} 
-                                        onShowBarcode={openBarcode} 
-                                    />
-                                ))}
-                            </div>
+                            <div className="grid grid-cols-1 gap-6">{filteredData.map((item, index) => <ProductCard key={index} item={item} onShowBarcode={(c, t) => setModalData({ isOpen: true, code: c, title: t })} />)}</div>
                         ) : (
-                            !isLoading && (
-                                <div className="text-center py-20 opacity-50">
-                                    <div className="mx-auto h-12 w-12 text-slate-600 mb-4 flex justify-center"><Icons.Search /></div>
-                                    <p className="text-xl">No results found.</p>
-                                </div>
-                            )
+                            !isLoading && <div className="text-center py-20 opacity-50"><div className="mx-auto h-12 w-12 text-slate-600 mb-4 flex justify-center"><Icons.Search /></div><p className="text-xl">No results found.</p></div>
                         )}
                     </div>
-                    
-                    <BarcodeModal 
-                        isOpen={modalData.isOpen} 
-                        code={modalData.code} 
-                        title={modalData.title} 
-                        onClose={() => setModalData({ ...modalData, isOpen: false })} 
-                    />
+                    <BarcodeModal isOpen={modalData.isOpen} code={modalData.code} title={modalData.title} onClose={() => setModalData({ ...modalData, isOpen: false })} />
                 </div>
             );
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
+
+        // --- PWA REGISZTRÁCIÓ ---
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(reg => console.log('SW reg success:', reg.scope))
+                    .catch(err => console.log('SW reg fail:', err));
+            });
+        }
     </script>
 </body>
 </html>
