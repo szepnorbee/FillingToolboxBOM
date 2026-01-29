@@ -1,9 +1,10 @@
-const CACHE_NAME = 'fillmaster-v1';
+const CACHE_NAME = 'fillmaster-v9-pwa'; // Verzió emelése a frissítés kényszerítéséhez
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
+  './config.js',           // FONTOS: Ez hiányozhatott!
   './manifest.json',
-  // Külső könyvtárak (CDN) - FONTOS: Ezeknek pontosan egyezniük kell az index.html-lel!
+  // Külső könyvtárak (CDN) - Ezek kellenek az offline működéshez
   'https://unpkg.com/react@18/umd/react.production.min.js',
   'https://unpkg.com/react-dom@18/umd/react-dom.production.min.js',
   'https://unpkg.com/@babel/standalone/babel.min.js',
@@ -11,42 +12,55 @@ const ASSETS_TO_CACHE = [
   'https://unpkg.com/bwip-js@3.0.4/dist/bwip-js-min.js'
 ];
 
-// Telepítéskor elmentjük a statikus fájlokat
+// Telepítés (Install): Fájlok letöltése
 self.addEventListener('install', (event) => {
+  self.skipWaiting(); // Azonnal aktiválódjon, ne várjon
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log('SW: Caching assets');
+      console.log('SW: Caching static assets');
       return cache.addAll(ASSETS_TO_CACHE);
     })
   );
 });
 
-// Kérések figyelése
-self.addEventListener('fetch', (event) => {
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      // Ha megvan cache-ben (pl. React libek), visszaadjuk onnan
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-      // Ha nincs, megpróbáljuk letölteni a netről
-      return fetch(event.request).catch(() => {
-        // Ha nincs net és nincs cache-ben sem -> itt lehetne egy fallback oldalt adni
-        // De az App Shell (index.html) már cache-elve van fentebb.
-      });
-    })
-  );
-});
-
-// Régi cache törlése frissítéskor
+// Aktiválás (Activate): Régi cache törlése
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keyList) => {
       return Promise.all(keyList.map((key) => {
         if (key !== CACHE_NAME) {
+          console.log('SW: Removing old cache', key);
           return caches.delete(key);
         }
       }));
+    })
+  );
+  return self.clients.claim();
+});
+
+// Hálózati kérések kezelése (Fetch)
+self.addEventListener('fetch', (event) => {
+  // Csak a GET kéréseket cache-eljük
+  if (event.request.method !== 'GET') return;
+
+  event.respondWith(
+    caches.match(event.request).then((cachedResponse) => {
+      // 1. Ha megvan offline-ban, adjuk vissza azt (gyors)
+      if (cachedResponse) {
+        return cachedResponse;
+      }
+      
+      // 2. Ha nincs, töltsük le a netről
+      return fetch(event.request).then((response) => {
+        // Ha nem sikerült letölteni (pl. 404), vagy nincs net
+        if (!response || response.status !== 200 || response.type !== 'basic') {
+          return response;
+        }
+
+        // Ha sikerült, és ez egy statikus fájl, elmenthetjük későbbre
+        // (Opcionális: itt most csak visszaadjuk, mert az install-nál mindent leszedtünk)
+        return response;
+      });
     })
   );
 });
