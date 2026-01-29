@@ -17,7 +17,7 @@
         .glass-panel { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
         .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        /* Scrollbar elrejtése mobilon, de funkció megtartása */
+        /* Scrollbar elrejtése mobilon */
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
@@ -29,8 +29,8 @@
         const { useState, useEffect, useMemo, useRef } = React;
 
         // --- KONFIGURÁCIÓ ---
-        const API_URL = "https://script.google.com/macros/s/AKfycbw5JO6bvRVl6YaznLgIaw8URIL8okq-cH-1yj1ZuMdFzUXQ9e5TmGmRguJnechzk6GT8Q/exec";
-        const CACHE_KEY = 'fillmaster_v3_data';
+        const API_URL = "https://script.google.com/macros/s/AKfycby7frvjPvAh5NoPubgPxkDTkuTZouIBLHE1TABnqBx3LL_CC7-jpwxrwzDFlC473zr3/exec";
+        const CACHE_KEY = 'fillmaster_v4_data';
 
         // --- ICONS ---
         const Icons = {
@@ -38,6 +38,7 @@
             Back: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>,
             Close: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>,
             Scan: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><rect x="7" y="7" width="10" height="10"></rect></svg>,
+            ChevronDown: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"></polyline></svg>,
             // Kategória Ikonok
             Bottle: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 2h6v5h-6z"/><path d="M9 7v13a4 4 0 0 0 4 4h-2a4 4 0 0 0-4-4V7z" fill="currentColor" className="opacity-20"/><rect x="7" y="7" width="10" height="15" rx="2" /></svg>,
             Cap: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M5 10h14a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2z" fill="currentColor" className="opacity-20"/><path d="M8 10V6a4 4 0 0 1 8 0v4"/></svg>,
@@ -46,8 +47,7 @@
             Liquid: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" fill="currentColor" className="opacity-20"></path></svg>
         };
 
-        // --- SEGÉDFÜGGVÉNYEK ---
-        // Ez elemzi a description-t és dönti el az ikont/színt
+        // --- HELPER: Kategória felismerés ---
         const getComponentType = (desc) => {
             const d = desc.toLowerCase();
             if (d.includes('btl') || d.includes('bottle') || d.includes('flasche')) return { type: 'Bottle', icon: <Icons.Bottle />, color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/30' };
@@ -85,9 +85,7 @@
             );
         };
 
-        // --- COMPONENTS ---
-
-        // 1. NÉZET: KIT VÁLASZTÓ
+        // --- VIEW 1: KIT SELECTION ---
         const KitSelectionView = ({ kits, onSelectKit, searchTerm, setSearchTerm, isLoading }) => {
             const filteredKits = kits.filter(k => k.kitName.toLowerCase().includes(searchTerm.toLowerCase()));
 
@@ -136,40 +134,51 @@
             );
         };
 
-        // 2. NÉZET: BOM OPERATOR VIEW
+        // --- VIEW 2: BOM OPERATOR VIEW (Accordion) ---
         const BOMView = ({ kit, onBack, onScan }) => {
             const [localSearch, setLocalSearch] = useState("");
+            const [expandedGroups, setExpandedGroups] = useState({}); // Tárolja melyik csoport van nyitva
 
-            // Csoportosítás logika: Level 1 a Szülő, Level 2 a Gyerekek
+            // Toggle function
+            const toggleGroup = (index) => {
+                setExpandedGroups(prev => ({
+                    ...prev,
+                    [index]: !prev[index]
+                }));
+            };
+
+            // 1. Lépés: Adatstruktúra felépítése és SZŰRÉS (Level > 2 kuka)
             const groupedBOM = useMemo(() => {
                 const groups = [];
                 let currentGroup = null;
 
                 kit.bom.forEach(item => {
-                    // Ha Level 1, új csoportot kezdünk
+                    // SZŰRÉS: Ha Level 2-nél mélyebb (pl 3,4), azt eldobjuk
+                    if (item.level > 2) return;
+
                     if (item.level == 1) {
                         currentGroup = { parent: item, children: [] };
                         groups.push(currentGroup);
-                    } else if (currentGroup && item.level > 1) {
-                        // Ha nem Level 1, hozzáadjuk az aktuális csoporthoz
+                    } else if (currentGroup && item.level == 2) {
                         currentGroup.children.push(item);
                     } else if (!currentGroup) {
-                        // Ha valami Level 2-vel kezdődik (hiba a struktúrában), csinálunk egy technikai csoportot
-                        currentGroup = { parent: { description: "Other Components", component: "", quantity: "" }, children: [item] };
+                        // Ha esetleg nem Level 1-el kezdődne
+                        currentGroup = { parent: { description: "General", component: "", quantity: "" }, children: [item] };
                         groups.push(currentGroup);
                     }
                 });
                 return groups;
             }, [kit]);
 
-            // Keresés szűrés
-            const filteredGroups = groupedBOM.map(group => {
+            // 2. Lépés: Keresés a felépített csoportokban
+            const filteredGroups = groupedBOM.map((group, index) => {
                 const term = localSearch.toLowerCase();
-                // Ha a szülő nevében van a keresés
-                if (group.parent.description.toLowerCase().includes(term) || group.parent.component.toString().includes(term)) {
-                    return group;
-                }
-                // Ha valamelyik gyerek nevében van a keresés, visszaadjuk a szülőt és a szűrt gyerekeket
+                // Ha a szülő nevében van a találat, mindent mutatunk
+                const parentMatch = group.parent.description.toLowerCase().includes(term) || group.parent.component.toString().includes(term);
+                
+                if (parentMatch) return { data: group, index: index };
+
+                // Ha a gyerekekben van találat, csak azokat a gyerekeket hagyjuk meg
                 const filteredChildren = group.children.filter(child => 
                     child.description.toLowerCase().includes(term) || 
                     child.component.toString().includes(term) ||
@@ -177,7 +186,7 @@
                 );
                 
                 if (filteredChildren.length > 0) {
-                    return { ...group, children: filteredChildren };
+                    return { data: { ...group, children: filteredChildren }, index: index };
                 }
                 return null;
             }).filter(g => g !== null);
@@ -186,7 +195,7 @@
             return (
                 <div className="h-screen flex flex-col bg-[#0f172a]">
                     {/* Header */}
-                    <div className="p-4 bg-slate-900/80 backdrop-blur border-b border-slate-800 sticky top-0 z-10 shadow-xl">
+                    <div className="p-4 bg-slate-900/80 backdrop-blur border-b border-slate-800 sticky top-0 z-20 shadow-xl">
                         <button onClick={onBack} className="flex items-center gap-2 text-slate-400 hover:text-white mb-3 transition-colors">
                             <Icons.Back /> <span className="text-sm font-bold uppercase tracking-wide">Back to Kits</span>
                         </button>
@@ -196,7 +205,7 @@
                             <div className="absolute left-3 top-2.5 text-slate-500"><Icons.Search /></div>
                             <input 
                                 type="text" 
-                                placeholder="Find part (e.g. 'CAP', '12345')..." 
+                                placeholder="Search part (e.g. 'CAP')..." 
                                 className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2 pl-9 pr-3 text-white focus:outline-none focus:border-blue-500"
                                 value={localSearch}
                                 onChange={(e) => setLocalSearch(e.target.value)}
@@ -204,58 +213,84 @@
                         </div>
                     </div>
 
-                    {/* BOM Content */}
-                    <div className="flex-1 overflow-y-auto p-4 space-y-8 pb-20">
-                        {filteredGroups.map((group, gIdx) => (
-                            <div key={gIdx} className="animate-fade-in" style={{animationDelay: `${gIdx * 50}ms`}}>
-                                {/* Level 1 Header (The Mix/Assembly) */}
-                                <div className="flex items-center gap-3 mb-3 pb-2 border-b border-slate-800">
-                                    <div className="w-2 h-8 bg-blue-500 rounded-full"></div>
-                                    <div>
-                                        <h3 className="text-white font-bold text-lg">{group.parent.description}</h3>
-                                        <div className="text-slate-500 text-xs font-mono">PN: {group.parent.component}</div>
-                                    </div>
-                                    {group.parent.quantity && <span className="ml-auto bg-slate-800 text-slate-300 text-xs px-2 py-1 rounded">{group.parent.quantity}</span>}
-                                </div>
+                    {/* BOM Content List */}
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-20">
+                        {filteredGroups.map((groupObj) => {
+                            const { data, index } = groupObj;
+                            const isOpen = expandedGroups[index] || localSearch.length > 0; // Ha keresünk, automatikusan nyíljon ki minden találat
 
-                                {/* Level 2 Grid (The Parts) */}
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    {group.children.map((child, cIdx) => {
-                                        const style = getComponentType(child.description);
-                                        return (
-                                            <div 
-                                                key={cIdx} 
-                                                className={`p-4 rounded-xl border flex items-start gap-4 hover:brightness-110 transition-all shadow-lg ${style.bg}`}
-                                            >
-                                                {/* Icon */}
-                                                <div className={`p-3 rounded-full bg-[#0f172a]/50 ${style.color}`}>
-                                                    {style.icon}
-                                                </div>
-
-                                                {/* Details */}
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex justify-between items-start">
-                                                        <div className={`text-xs font-bold uppercase tracking-wider mb-0.5 ${style.color}`}>{style.type}</div>
-                                                        {child.quantity && <span className="text-xs bg-black/30 text-white px-1.5 py-0.5 rounded">{child.quantity}</span>}
-                                                    </div>
-                                                    
-                                                    <h4 className="text-white font-medium leading-snug break-words mb-1">{child.description}</h4>
-                                                    
-                                                    {/* Clickable Material Number */}
-                                                    <button 
-                                                        onClick={() => onScan(child.component, child.description)}
-                                                        className="flex items-center gap-2 mt-2 bg-black/20 hover:bg-black/40 px-2 py-1 rounded text-sm font-mono text-slate-300 transition-colors w-full sm:w-auto"
-                                                    >
-                                                        <Icons.Scan />
-                                                        <span className="underline decoration-dotted decoration-slate-500 underline-offset-4">{child.component}</span>
-                                                    </button>
-                                                </div>
+                            return (
+                                <div key={index} className="bg-slate-900/40 border border-slate-800 rounded-xl overflow-hidden animate-fade-in">
+                                    
+                                    {/* Level 1 Header (Clickable Accordion) */}
+                                    <div 
+                                        onClick={() => toggleGroup(index)}
+                                        className="flex items-center gap-3 p-4 cursor-pointer hover:bg-slate-800/50 transition-colors select-none"
+                                    >
+                                        <div className="w-1.5 h-8 bg-blue-500 rounded-full flex-shrink-0"></div>
+                                        <div className="flex-1 min-w-0">
+                                            <h3 className="text-white font-bold text-lg leading-tight break-words">{data.parent.description}</h3>
+                                            <div className="text-slate-500 text-xs font-mono mt-1">PN: {data.parent.component}</div>
+                                        </div>
+                                        
+                                        <div className="flex items-center gap-3">
+                                            {data.parent.quantity && (
+                                                <span className="bg-slate-800 text-slate-300 text-xs px-2 py-1 rounded hidden sm:inline-block">
+                                                    {data.parent.quantity}
+                                                </span>
+                                            )}
+                                            <div className={`text-slate-500 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`}>
+                                                <Icons.ChevronDown />
                                             </div>
-                                        );
-                                    })}
+                                        </div>
+                                    </div>
+
+                                    {/* Level 2 Content (Collapsible) */}
+                                    {isOpen && (
+                                        <div className="p-3 pt-0 border-t border-slate-800/50 bg-black/20">
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                                                {data.children.map((child, cIdx) => {
+                                                    const style = getComponentType(child.description);
+                                                    return (
+                                                        <div 
+                                                            key={cIdx} 
+                                                            className={`p-3 rounded-lg border flex items-start gap-3 hover:brightness-110 transition-all ${style.bg}`}
+                                                        >
+                                                            {/* Icon */}
+                                                            <div className={`p-2 rounded-full bg-[#0f172a]/50 flex-shrink-0 ${style.color}`}>
+                                                                {style.icon}
+                                                            </div>
+
+                                                            {/* Details */}
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex justify-between items-start">
+                                                                    <div className={`text-[10px] font-bold uppercase tracking-wider mb-0.5 ${style.color}`}>{style.type}</div>
+                                                                    {child.quantity && <span className="text-[10px] bg-black/30 text-white px-1.5 py-0.5 rounded">{child.quantity}</span>}
+                                                                </div>
+                                                                
+                                                                <h4 className="text-slate-200 font-medium text-sm leading-snug break-words mb-2">{child.description}</h4>
+                                                                
+                                                                {/* Clickable Material Number */}
+                                                                <button 
+                                                                    onClick={() => onScan(child.component, child.description)}
+                                                                    className="flex items-center gap-2 bg-black/20 hover:bg-black/40 px-2 py-1.5 rounded text-xs font-mono text-slate-300 transition-colors w-full sm:w-auto justify-center sm:justify-start"
+                                                                >
+                                                                    <Icons.Scan />
+                                                                    <span className="underline decoration-dotted decoration-slate-500 underline-offset-2">{child.component}</span>
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                                {data.children.length === 0 && (
+                                                    <div className="text-slate-600 text-sm italic p-2">No Level 2 components listed.</div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                         
                         {filteredGroups.length === 0 && (
                             <div className="text-center text-slate-500 mt-10">No parts found matching "{localSearch}"</div>
