@@ -12,12 +12,13 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/bwip-js@3.0.4/dist/bwip-js-min.js"></script>
 
+    <script src="config.js"></script>
+
     <style>
         body { background-color: #0f172a; color: #e2e8f0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         .glass-panel { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
         .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        /* Scrollbar elrejtése mobilon */
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
@@ -28,9 +29,14 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo, useRef } = React;
 
-        // --- KONFIGURÁCIÓ ---
-        const API_URL = "https://script.google.com/macros/s/AKfycbw5JO6bvRVl6YaznLgIaw8URIL8okq-cH-1yj1ZuMdFzUXQ9e5TmGmRguJnechzk6GT8Q/exec";
-        const CACHE_KEY = 'fillmaster_v4_data';
+        // --- KONFIGURÁCIÓ BETÖLTÉSE ---
+        // Ha valamiért nem töltődne be a config.js, legyen egy fallback, vagy hibaüzenet
+        const API_URL = window.APP_CONFIG ? window.APP_CONFIG.API_URL : "";
+        const CACHE_KEY = 'fillmaster_v5_data';
+
+        if (!API_URL) {
+            alert("HIBA: A config.js fájl hiányzik vagy hibás!");
+        }
 
         // --- ICONS ---
         const Icons = {
@@ -137,9 +143,8 @@
         // --- VIEW 2: BOM OPERATOR VIEW (Accordion) ---
         const BOMView = ({ kit, onBack, onScan }) => {
             const [localSearch, setLocalSearch] = useState("");
-            const [expandedGroups, setExpandedGroups] = useState({}); // Tárolja melyik csoport van nyitva
+            const [expandedGroups, setExpandedGroups] = useState({}); 
 
-            // Toggle function
             const toggleGroup = (index) => {
                 setExpandedGroups(prev => ({
                     ...prev,
@@ -147,14 +152,12 @@
                 }));
             };
 
-            // 1. Lépés: Adatstruktúra felépítése és SZŰRÉS (Level > 2 kuka)
             const groupedBOM = useMemo(() => {
                 const groups = [];
                 let currentGroup = null;
 
                 kit.bom.forEach(item => {
-                    // SZŰRÉS: Ha Level 2-nél mélyebb (pl 3,4), azt eldobjuk
-                    if (item.level > 2) return;
+                    if (item.level > 2) return; 
 
                     if (item.level == 1) {
                         currentGroup = { parent: item, children: [] };
@@ -162,7 +165,6 @@
                     } else if (currentGroup && item.level == 2) {
                         currentGroup.children.push(item);
                     } else if (!currentGroup) {
-                        // Ha esetleg nem Level 1-el kezdődne
                         currentGroup = { parent: { description: "General", component: "", quantity: "" }, children: [item] };
                         groups.push(currentGroup);
                     }
@@ -170,15 +172,12 @@
                 return groups;
             }, [kit]);
 
-            // 2. Lépés: Keresés a felépített csoportokban
             const filteredGroups = groupedBOM.map((group, index) => {
                 const term = localSearch.toLowerCase();
-                // Ha a szülő nevében van a találat, mindent mutatunk
                 const parentMatch = group.parent.description.toLowerCase().includes(term) || group.parent.component.toString().includes(term);
                 
                 if (parentMatch) return { data: group, index: index };
 
-                // Ha a gyerekekben van találat, csak azokat a gyerekeket hagyjuk meg
                 const filteredChildren = group.children.filter(child => 
                     child.description.toLowerCase().includes(term) || 
                     child.component.toString().includes(term) ||
@@ -217,7 +216,7 @@
                     <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-20">
                         {filteredGroups.map((groupObj) => {
                             const { data, index } = groupObj;
-                            const isOpen = expandedGroups[index] || localSearch.length > 0; // Ha keresünk, automatikusan nyíljon ki minden találat
+                            const isOpen = expandedGroups[index] || localSearch.length > 0; 
 
                             return (
                                 <div key={index} className="bg-slate-900/40 border border-slate-800 rounded-xl overflow-hidden animate-fade-in">
@@ -225,21 +224,38 @@
                                     {/* Level 1 Header (Clickable Accordion) */}
                                     <div 
                                         onClick={() => toggleGroup(index)}
-                                        className="flex items-center gap-3 p-4 cursor-pointer hover:bg-slate-800/50 transition-colors select-none"
+                                        className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 cursor-pointer hover:bg-slate-800/50 transition-colors select-none"
                                     >
-                                        <div className="w-1.5 h-8 bg-blue-500 rounded-full flex-shrink-0"></div>
-                                        <div className="flex-1 min-w-0">
-                                            <h3 className="text-white font-bold text-lg leading-tight break-words">{data.parent.description}</h3>
-                                            <div className="text-slate-500 text-xs font-mono mt-1">PN: {data.parent.component}</div>
+                                        {/* Bal oldali sáv + Cím */}
+                                        <div className="flex items-start gap-3 flex-1">
+                                            <div className="w-1.5 h-10 bg-blue-500 rounded-full flex-shrink-0 mt-1"></div>
+                                            <div className="min-w-0">
+                                                <h3 className="text-white font-bold text-xl leading-tight break-words">{data.parent.description}</h3>
+                                                
+                                                {/* NAGY MÉRETŰ, KATTINTHATÓ CIKKSZÁM (LEVEL 1) */}
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation(); // Megakadályozza, hogy összecsukódjon a lista
+                                                        onScan(data.parent.component, data.parent.description);
+                                                    }}
+                                                    className="mt-2 inline-flex items-center gap-2 bg-blue-500/20 hover:bg-blue-500/40 text-blue-300 border border-blue-500/30 px-3 py-1.5 rounded-lg transition-colors group"
+                                                >
+                                                    <Icons.Scan />
+                                                    <span className="text-lg font-mono font-bold tracking-wide underline decoration-dotted decoration-blue-500/50 group-hover:text-white">
+                                                        {data.parent.component}
+                                                    </span>
+                                                </button>
+                                            </div>
                                         </div>
                                         
-                                        <div className="flex items-center gap-3">
+                                        {/* Jobb oldal: Mennyiség + Nyíl */}
+                                        <div className="flex items-center justify-between sm:justify-end gap-4 mt-2 sm:mt-0 pl-4 sm:pl-0 border-t sm:border-t-0 border-slate-800 pt-2 sm:pt-0">
                                             {data.parent.quantity && (
-                                                <span className="bg-slate-800 text-slate-300 text-xs px-2 py-1 rounded hidden sm:inline-block">
+                                                <span className="bg-slate-800 text-slate-300 font-mono text-sm px-3 py-1 rounded">
                                                     {data.parent.quantity}
                                                 </span>
                                             )}
-                                            <div className={`text-slate-500 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`}>
+                                            <div className={`text-slate-500 transition-transform duration-300 p-2 bg-slate-900 rounded-full ${isOpen ? 'rotate-180' : ''}`}>
                                                 <Icons.ChevronDown />
                                             </div>
                                         </div>
@@ -270,7 +286,7 @@
                                                                 
                                                                 <h4 className="text-slate-200 font-medium text-sm leading-snug break-words mb-2">{child.description}</h4>
                                                                 
-                                                                {/* Clickable Material Number */}
+                                                                {/* Clickable Material Number (Level 2) */}
                                                                 <button 
                                                                     onClick={() => onScan(child.component, child.description)}
                                                                     className="flex items-center gap-2 bg-black/20 hover:bg-black/40 px-2 py-1.5 rounded text-xs font-mono text-slate-300 transition-colors w-full sm:w-auto justify-center sm:justify-start"
@@ -302,7 +318,7 @@
 
         // --- MAIN APP ---
         const App = () => {
-            const [view, setView] = useState('list'); // 'list' | 'detail'
+            const [view, setView] = useState('list');
             const [kits, setKits] = useState([]);
             const [selectedKit, setSelectedKit] = useState(null);
             const [mainSearch, setMainSearch] = useState("");
@@ -324,7 +340,7 @@
                     } catch (e) { console.error(e); }
                     finally { setIsLoading(false); }
                 };
-                load();
+                if(API_URL) load();
             }, []);
 
             return (
