@@ -4,8 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#0f172a">
-    <meta name="description" content="FillMaster Assist Operator Tool">
-    <title>FillMaster - Operator View</title>
+    <title>FillMaster - Production Dashboard</title>
     
     <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/1048/1048953.png">
@@ -15,18 +14,21 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/bwip-js@3.0.4/dist/bwip-js-min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
 
     <script src="config.js"></script>
 
     <style>
         body { background-color: #0f172a; color: #e2e8f0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .glass-panel { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
-        .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+        .glass-panel { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37); }
+        .glass-card { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05); transition: all 0.2s; }
+        .glass-card:hover { background: rgba(255, 255, 255, 0.07); transform: translateY(-2px); border-color: rgba(255, 255, 255, 0.2); }
+        .animate-fade-in { animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        .animate-spin { animation: spin 1s linear infinite; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
     </style>
 </head>
 <body>
@@ -34,193 +36,212 @@
 
     <script type="text/babel">
         const { useState, useEffect, useMemo, useRef } = React;
+        
+        // --- KONFIGURÁCIÓ BEOLVASÁSA ---
+        const CONFIG = window.APP_CONFIG || {};
+        const API_URL = CONFIG.API_URL || "";
+        const SHEET_URL = CONFIG.SHEET_URL || "#";
+        
+        // Gépek és Formátumok beolvasása a config.js-ből (fallback értékekkel)
+        const MACHINES = CONFIG.MACHINES || [{ id: 'M1', name: 'Machine 1' }];
+        const FORMATS = CONFIG.FORMATS || [{ id: 'F1', name: 'Default Format', color: 'bg-gray-500' }];
 
-        // --- KONFIGURÁCIÓ BETÖLTÉSE ---
-        const API_URL = window.APP_CONFIG ? window.APP_CONFIG.API_URL : "";
-        const SHEET_URL = window.APP_CONFIG ? window.APP_CONFIG.SHEET_URL : "#";
-        const CACHE_KEY = 'fillmaster_v10_data'; 
-
-        if (!API_URL) {
-            alert("HIBA: A config.js fájl hiányzik vagy hibás!");
-        }
+        const STORAGE_JOBS_KEY = 'fillmaster_jobs_v2';
+        const STORAGE_DATA_KEY = 'fillmaster_data_v10';
 
         // --- ICONS ---
-        const Icons = {
-            Search: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>,
-            Back: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>,
-            Close: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>,
-            Scan: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><rect x="7" y="7" width="10" height="10"></rect></svg>,
-            ChevronDown: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"></polyline></svg>,
-            Refresh: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>,
-            Edit: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>,
-            
-            // Kategória Ikonok
-            Bottle: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 2h6v5h-6z"/><path d="M9 7v13a4 4 0 0 0 4 4h-2a4 4 0 0 0-4-4V7z" fill="currentColor" className="opacity-20"/><rect x="7" y="7" width="10" height="15" rx="2" /></svg>,
-            Cap: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M5 10h14a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2z" className="opacity-80"/><path d="M8 10V6a4 4 0 0 1 8 0v4" className="opacity-60"/></svg>,
-            Label: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" fill="currentColor" className="opacity-20"/><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>,
-            Box: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>,
-            Liquid: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" fill="currentColor" className="opacity-20"></path></svg>
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const icons = {
+                LayoutDashboard: <path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z" />,
+                List: <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>,
+                Plus: <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>,
+                Play: <polygon points="5 3 19 12 5 21 5 3"/>,
+                Check: <polyline points="20 6 9 17 4 12"/>,
+                Clock: <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>,
+                Calendar: <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>,
+                Search: <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>,
+                ArrowLeft: <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>,
+                Scan: <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="10" height="10"/>,
+                Trash: <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>,
+                ChevronDown: <polyline points="6 9 12 15 18 9"/>,
+                X: <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            };
+            return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{icons[name] || icons.List}</svg>;
         };
 
-        // --- HELPER: Kategória és SZÍN felismerés ---
+        const parseKitName = (fullName) => {
+            const lastDashIndex = fullName.lastIndexOf('-');
+            if (lastDashIndex === -1) return { name: fullName, code: "" };
+            return { name: fullName.substring(0, lastDashIndex).trim(), code: fullName.substring(lastDashIndex + 1).trim() };
+        };
+
         const getComponentType = (desc) => {
             const d = desc.toLowerCase();
-            
             if (d.includes('cap') || d.includes('deckel')) {
-                let colorClass = 'text-slate-400'; 
-                let bgClass = 'bg-slate-500/10 border-slate-500/30';
-
+                let colorClass = 'text-slate-400'; let bgClass = 'bg-slate-500/10 border-slate-500/30';
                 if (d.includes('red') || d.includes('rot')) { colorClass = 'text-red-500'; bgClass = 'bg-red-500/10 border-red-500/30'; }
                 else if (d.includes('blue') || d.includes('blau')) { colorClass = 'text-blue-500'; bgClass = 'bg-blue-500/10 border-blue-500/30'; }
                 else if (d.includes('green') || d.includes('grün')) { colorClass = 'text-green-500'; bgClass = 'bg-green-500/10 border-green-500/30'; }
                 else if (d.includes('yellow') || d.includes('gelb')) { colorClass = 'text-yellow-400'; bgClass = 'bg-yellow-500/10 border-yellow-500/30'; }
-                else if (d.includes('white') || d.includes('weiss') || d.includes('weiß')) { colorClass = 'text-white'; bgClass = 'bg-white/10 border-white/30'; }
+                else if (d.includes('white') || d.includes('weiss')) { colorClass = 'text-white'; bgClass = 'bg-white/10 border-white/30'; }
                 else if (d.includes('black') || d.includes('schwarz')) { colorClass = 'text-slate-300'; bgClass = 'bg-slate-700 border-slate-600'; }
                 else if (d.includes('orange')) { colorClass = 'text-orange-500'; bgClass = 'bg-orange-500/10 border-orange-500/30'; }
-                else if (d.includes('purple') || d.includes('lila') || d.includes('violet')) { colorClass = 'text-purple-500'; bgClass = 'bg-purple-500/10 border-purple-500/30'; }
-                else if (d.includes('brown') || d.includes('braun')) { colorClass = 'text-amber-700'; bgClass = 'bg-amber-700/10 border-amber-700/30'; }
-
-                return { type: 'Cap', icon: <Icons.Cap />, color: colorClass, bg: bgClass };
+                return { type: 'Cap', icon: 'Cap', color: colorClass, bg: bgClass };
             }
-
-            if (d.includes('btl') || d.includes('bottle') || d.includes('flasche')) return { type: 'Bottle', icon: <Icons.Bottle />, color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/30' };
-            if (d.includes('label') || d.includes('etikett')) return { type: 'Label', icon: <Icons.Label />, color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/30' };
-            if (d.includes('bulk') || d.includes('buffer')) return { type: 'Liquid', icon: <Icons.Liquid />, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/30' };
-            
-            return { type: 'Other', icon: <Icons.Box />, color: 'text-slate-400', bg: 'bg-slate-800/50 border-slate-700' };
+            if (d.includes('btl') || d.includes('bottle')) return { type: 'Bottle', icon: 'Bottle', color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/30' };
+            if (d.includes('label')) return { type: 'Label', icon: 'Label', color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/30' };
+            return { type: 'Other', icon: 'Box', color: 'text-slate-400', bg: 'bg-slate-800/50 border-slate-700' };
         };
 
-        const BarcodeModal = ({ isOpen, onClose, code, title }) => {
-            const canvasRef = useRef(null);
-            useEffect(() => {
-                if (isOpen && code && canvasRef.current) {
-                    try {
-                        bwipjs.toCanvas(canvasRef.current, {
-                            bcid: 'datamatrix', text: code.toString(), scale: 3, height: 20, width: 20, padding: 10, backgroundcolor: 'ffffff'
-                        });
-                    } catch (e) {}
-                }
-            }, [isOpen, code]);
+        // --- COMPONENTS ---
+
+        const CreateJobModal = ({ isOpen, onClose, kits, onCreate }) => {
+            const [selectedKit, setSelectedKit] = useState("");
+            const [quantity, setQuantity] = useState(1000);
+            const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+            // Default értékek a configból
+            const [machine, setMachine] = useState(MACHINES[0]?.id || "");
+            const [format, setFormat] = useState(FORMATS[0]?.id || "");
+            
             if (!isOpen) return null;
-            return (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-fade-in" onClick={onClose}>
-                    <div className="bg-white text-slate-900 rounded-2xl w-full max-w-sm flex flex-col items-center relative" onClick={e => e.stopPropagation()}>
-                        <div className="w-full p-4 bg-slate-100 border-b flex justify-between items-center rounded-t-2xl">
-                            <h3 className="font-bold text-lg text-slate-700 truncate pr-4">{title}</h3>
-                            <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full"><Icons.Close /></button>
-                        </div>
-                        <div className="p-8 flex flex-col items-center gap-4">
-                            <canvas ref={canvasRef} className="border-2 border-slate-900 rounded-lg"></canvas>
-                            <div className="text-center"><p className="text-xs uppercase text-slate-400">Material No.</p><p className="text-3xl font-mono font-bold">{code}</p></div>
-                        </div>
-                    </div>
-                </div>
-            );
-        };
-
-        // --- SEGÉDFÜGGVÉNY: NÉV ÉS KÓD SZÉTVÁLASZTÁSA ---
-        const parseKitName = (fullName) => {
-            const lastDashIndex = fullName.lastIndexOf('-');
-            if (lastDashIndex === -1) return { name: fullName, code: "" };
-            
-            const name = fullName.substring(0, lastDashIndex).trim();
-            const code = fullName.substring(lastDashIndex + 1).trim();
-            return { name, code };
-        };
-
-        // --- VIEW 1: KIT SELECTION ---
-        const KitSelectionView = ({ kits, onSelectKit, searchTerm, setSearchTerm, isLoading, onRefresh }) => {
-            const filteredKits = kits.filter(k => k.kitName.toLowerCase().includes(searchTerm.toLowerCase()));
 
             return (
-                <div className="max-w-md mx-auto h-screen flex flex-col p-4">
-                    <div className="mb-2 text-center mt-4">
-                        <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-teal-400">FillMaster</h1>
-                        <p className="text-slate-400 text-sm">Operator Select</p>
-                    </div>
-
-                    <div className="flex gap-3 justify-center mb-6">
-                        <a 
-                            href={SHEET_URL} 
-                            target="_blank" 
-                            className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg"
-                        >
-                            <Icons.Edit /> Database
-                        </a>
-                        <button 
-                            onClick={() => onRefresh(true)} 
-                            disabled={isLoading}
-                            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg"
-                        >
-                            <div className={isLoading ? "animate-spin" : ""}><Icons.Refresh /></div>
-                            {isLoading ? "Syncing..." : "Refresh"}
-                        </button>
-                    </div>
-
-                    <div className="relative mb-6">
-                        <div className="absolute left-3 top-3.5 text-slate-500"><Icons.Search /></div>
-                        <input 
-                            type="text" 
-                            placeholder="Search Kit / Product..." 
-                            className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 pl-10 pr-4 text-white text-lg focus:outline-none focus:border-blue-500 transition-all shadow-lg"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                        />
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto space-y-3 pb-10">
-                        {isLoading && kits.length === 0 ? (
-                            <div className="text-center text-slate-500 mt-10">Loading Data...</div>
-                        ) : filteredKits.length > 0 ? (
-                            filteredKits.map((kit, idx) => {
-                                const { name, code } = parseKitName(kit.kitName);
-                                return (
-                                    <button 
-                                        key={idx}
-                                        onClick={() => onSelectKit(kit)}
-                                        className="w-full text-left glass-panel p-4 rounded-xl flex items-center justify-between group hover:bg-slate-800 transition-all active:scale-95"
-                                    >
-                                        <div>
-                                            <div className="font-bold text-lg text-white group-hover:text-blue-300 transition-colors leading-tight">{name}</div>
-                                            {code && (
-                                                <div className="text-cyan-400 font-mono text-sm font-bold mt-1 tracking-wide">
-                                                    {code}
-                                                </div>
-                                            )}
-                                            <div className="text-xs text-slate-500 mt-1">{kit.bom.length} components</div>
-                                        </div>
-                                        <div className="text-slate-600 group-hover:translate-x-1 transition-transform">
-                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
-                                        </div>
-                                    </button>
-                                );
-                            })
-                        ) : (
-                            <div className="text-center text-slate-600 mt-10">
-                                {isLoading ? "Updating..." : "No matching kits found."}
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+                    <div className="bg-slate-900 border border-slate-700 w-full max-w-lg rounded-2xl p-6 shadow-2xl relative">
+                        <h2 className="text-xl font-bold text-white mb-4">Create Production Plan</h2>
+                        
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm text-slate-400 mb-1">Select Kit</label>
+                                <select className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white focus:border-blue-500 outline-none" value={selectedKit} onChange={e => setSelectedKit(e.target.value)}>
+                                    <option value="">-- Choose a Kit --</option>
+                                    {kits.map((k, i) => <option key={i} value={k.kitName}>{k.kitName}</option>)}
+                                </select>
                             </div>
-                        )}
+                            
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm text-slate-400 mb-1">Target Machine</label>
+                                    <select className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white focus:border-blue-500 outline-none" value={machine} onChange={e => setMachine(e.target.value)}>
+                                        {MACHINES.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm text-slate-400 mb-1">Format Set</label>
+                                    <select className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white focus:border-blue-500 outline-none" value={format} onChange={e => setFormat(e.target.value)}>
+                                        {FORMATS.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm text-slate-400 mb-1">Quantity (pcs)</label>
+                                    <input type="number" value={quantity} onChange={e => setQuantity(e.target.value)} className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm text-slate-400 mb-1">Date</label>
+                                    <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3 mt-8">
+                            <button onClick={onClose} className="flex-1 py-3 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 font-medium">Cancel</button>
+                            <button onClick={() => { if(selectedKit) { onCreate({ kitName: selectedKit, quantity, date, machine, format }); onClose(); }}} className="flex-1 py-3 rounded-xl bg-blue-600 text-white hover:bg-blue-500 font-bold shadow-lg shadow-blue-900/20">Create Plan</button>
+                        </div>
                     </div>
                 </div>
             );
         };
 
-        // --- VIEW 2: BOM OPERATOR VIEW (Accordion) ---
-        const BOMView = ({ kit, onBack, onScan }) => {
-            const [localSearch, setLocalSearch] = useState("");
-            const [expandedGroups, setExpandedGroups] = useState({}); 
+        const KanbanColumn = ({ title, icon, color, jobs, onAction, status }) => (
+            <div className="flex flex-col h-full min-w-[280px] sm:min-w-[340px] bg-slate-900/30 rounded-2xl p-3 border border-slate-800/50">
+                <div className={`flex items-center gap-2 p-3 mb-2 border-b-2 ${color} border-opacity-30`}>
+                    <Icon name={icon} className="text-slate-400" />
+                    <h3 className="font-bold text-slate-200 uppercase tracking-wide text-sm">{title}</h3>
+                    <span className="ml-auto bg-slate-800 text-xs px-2 py-1 rounded-full text-slate-400">{jobs.length}</span>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto space-y-3 p-1 custom-scrollbar">
+                    {jobs.map(job => {
+                        const { name, code } = parseKitName(job.kitName);
+                        // Keresés a definíciók között (configból)
+                        const formatObj = FORMATS.find(f => f.id === job.format) || FORMATS[0];
+                        const machineObj = MACHINES.find(m => m.id === job.machine) || MACHINES[0];
 
-            const toggleGroup = (index) => {
-                setExpandedGroups(prev => ({ ...prev, [index]: !prev[index] }));
+                        return (
+                            <div key={job.id} className="glass-card p-4 rounded-xl relative group flex flex-col gap-2">
+                                <div className="flex justify-between items-start">
+                                    <div className="flex gap-2">
+                                        <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">{job.date}</span>
+                                        <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${machineObj.id === 'M1' ? 'bg-blue-900/30 text-blue-300 border-blue-500/30' : 'bg-orange-900/30 text-orange-300 border-orange-500/30'}`}>
+                                            {machineObj.id}
+                                        </span>
+                                    </div>
+                                    {status === 'planned' && (
+                                        <button onClick={() => onAction(job.id, 'delete')} className="text-slate-600 hover:text-red-400"><Icon name="Trash" size={14}/></button>
+                                    )}
+                                </div>
+                                
+                                <div>
+                                    <h4 className="font-bold text-slate-200 leading-tight text-sm">{name}</h4>
+                                    <div className="text-[10px] font-mono font-bold text-cyan-400 mt-0.5">{code}</div>
+                                </div>
+
+                                <div className={`text-[10px] font-bold px-2 py-1 rounded border w-fit ${formatObj.color}`}>
+                                    <span className="opacity-75 mr-1">SET:</span> {formatObj.name}
+                                </div>
+
+                                <div className="flex justify-between items-end mt-1 pt-2 border-t border-slate-800">
+                                    <div className="text-sm text-slate-400">Qty: <b className="text-white">{job.quantity}</b></div>
+                                    
+                                    {status === 'planned' && (
+                                        <button onClick={() => onAction(job.id, 'start')} className="bg-blue-600 hover:bg-blue-500 text-white p-1.5 px-3 rounded-lg text-xs font-bold shadow-lg transition-transform active:scale-95 flex items-center gap-1">
+                                            <Icon name="Play" size={12}/> Start
+                                        </button>
+                                    )}
+                                    {status === 'running' && (
+                                        <div className="flex gap-2">
+                                            <button onClick={() => onAction(job.id, 'open')} className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg">
+                                                <Icon name="List" size={16}/>
+                                            </button>
+                                            <button onClick={() => onAction(job.id, 'finish')} className="bg-emerald-600 hover:bg-emerald-500 text-white p-2 rounded-lg">
+                                                <Icon name="Check" size={16}/>
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
+                    {jobs.length === 0 && <div className="text-center py-10 text-slate-600 italic text-sm">No jobs here</div>}
+                </div>
+            </div>
+        );
+
+        const BOMView = ({ kit, job, onBack, onScan }) => {
+            const [localSearch, setLocalSearch] = useState("");
+            const [expandedGroups, setExpandedGroups] = useState({});
+            const toggleGroup = (index) => setExpandedGroups(p => ({ ...p, [index]: !p[index] }));
+            
+            const calcQty = (baseQty) => {
+                if(!baseQty) return "";
+                const match = baseQty.toString().match(/([\d\.]+)\s*([a-zA-Z]+)/);
+                if(match) {
+                    const val = parseFloat(match[1]);
+                    const unit = match[2];
+                    const total = (val * job.quantity).toFixed(2);
+                    return `${total} ${unit}`; 
+                }
+                return baseQty;
             };
 
             const groupedBOM = useMemo(() => {
                 const groups = [];
                 let currentGroup = null;
-
                 kit.bom.forEach(item => {
-                    if (item.level > 2) return; 
-
+                    if (item.level > 2) return;
                     if (item.level == 1) {
                         currentGroup = { parent: item, children: [] };
                         groups.push(currentGroup);
@@ -234,206 +255,198 @@
                 return groups;
             }, [kit]);
 
-            const filteredGroups = groupedBOM.map((group, index) => {
+            const filteredGroups = groupedBOM.map((group, idx) => {
                 const term = localSearch.toLowerCase();
-                const parentMatch = group.parent.description.toLowerCase().includes(term) || group.parent.component.toString().includes(term);
-                
-                if (parentMatch) return { data: group, index: index };
+                const pMatch = group.parent.description.toLowerCase().includes(term) || group.parent.component.toString().includes(term);
+                if (pMatch) return { data: group, index: idx };
+                const fChildren = group.children.filter(c => c.description.toLowerCase().includes(term) || c.component.toString().includes(term));
+                return fChildren.length ? { data: { ...group, children: fChildren }, index: idx } : null;
+            }).filter(Boolean);
 
-                const filteredChildren = group.children.filter(child => 
-                    child.description.toLowerCase().includes(term) || 
-                    child.component.toString().includes(term) ||
-                    getComponentType(child.description).type.toLowerCase().includes(term)
-                );
-                
-                if (filteredChildren.length > 0) {
-                    return { data: { ...group, children: filteredChildren }, index: index };
-                }
-                return null;
-            }).filter(g => g !== null);
+            const { name, code } = parseKitName(kit.kitName);
+            const formatObj = FORMATS.find(f => f.id === job.format) || FORMATS[0];
 
             return (
                 <div className="h-screen flex flex-col bg-[#0f172a]">
-                    <div className="p-4 bg-slate-900/80 backdrop-blur border-b border-slate-800 sticky top-0 z-20 shadow-xl">
-                        <button onClick={onBack} className="flex items-center gap-2 text-slate-400 hover:text-white mb-3 transition-colors">
-                            <Icons.Back /> <span className="text-sm font-bold uppercase tracking-wide">Back to Kits</span>
-                        </button>
-                        
-                        <div className="pr-4">
-                            <h2 className="text-xl font-bold text-white leading-tight break-words">
-                                {parseKitName(kit.kitName).name}
-                            </h2>
-                             <div className="text-cyan-400 font-mono text-sm font-bold mt-0.5 tracking-wide">
-                                {parseKitName(kit.kitName).code}
+                    <div className="bg-slate-900 border-b border-slate-700 p-4 sticky top-0 z-20 shadow-xl">
+                        <div className="flex justify-between items-start mb-2">
+                            <button onClick={onBack} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
+                                <Icon name="ArrowLeft" /> <span className="text-sm font-bold uppercase">Dashboard</span>
+                            </button>
+                            <div className="text-right">
+                                <span className="text-xs text-slate-500 uppercase tracking-widest block">Running on {job.machine}</span>
+                                <span className={`text-xs font-bold px-2 py-0.5 rounded border ${formatObj.color}`}>{formatObj.name}</span>
                             </div>
                         </div>
-                        
-                        <div className="relative mt-3">
-                            <div className="absolute left-3 top-2.5 text-slate-500"><Icons.Search /></div>
-                            <input 
-                                type="text" 
-                                placeholder="Search part (e.g. 'CAP')..." 
-                                className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2 pl-9 pr-3 text-white focus:outline-none focus:border-blue-500"
-                                value={localSearch}
-                                onChange={(e) => setLocalSearch(e.target.value)}
-                            />
+                        <h2 className="text-2xl font-bold text-white leading-tight">{name}</h2>
+                        <div className="text-cyan-400 font-mono font-bold mb-4">{code}</div>
+                        <div className="relative">
+                            <div className="absolute left-3 top-2.5 text-slate-500"><Icon name="Search" /></div>
+                            <input type="text" placeholder="Search part..." className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2 pl-10 pr-3 text-white focus:outline-none focus:border-blue-500" value={localSearch} onChange={e => setLocalSearch(e.target.value)} />
                         </div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-20">
-                        {filteredGroups.map((groupObj) => {
-                            const { data, index } = groupObj;
-                            const isOpen = expandedGroups[index] || localSearch.length > 0; 
-
+                    <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-20 custom-scrollbar">
+                        {filteredGroups.map(({ data, index }) => {
+                            const isOpen = expandedGroups[index] || localSearch.length > 0;
                             return (
-                                <div key={index} className="bg-slate-900/40 border border-slate-800 rounded-xl overflow-hidden animate-fade-in">
-                                    <div 
-                                        onClick={() => toggleGroup(index)}
-                                        className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 cursor-pointer hover:bg-slate-800/50 transition-colors select-none"
-                                    >
-                                        <div className="flex items-start gap-3 flex-1">
-                                            <div className="w-1.5 h-10 bg-blue-500 rounded-full flex-shrink-0 mt-1"></div>
-                                            <div className="min-w-0">
-                                                <h3 className="text-white font-bold text-xl leading-tight break-words">{data.parent.description}</h3>
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation(); 
-                                                        onScan(data.parent.component, data.parent.description);
-                                                    }}
-                                                    className="mt-2 inline-flex items-center gap-2 bg-blue-500/20 hover:bg-blue-500/40 text-blue-300 border border-blue-500/30 px-3 py-1.5 rounded-lg transition-colors group"
-                                                >
-                                                    <Icons.Scan />
-                                                    <span className="text-lg font-mono font-bold tracking-wide underline decoration-dotted decoration-blue-500/50 group-hover:text-white">
-                                                        {data.parent.component}
-                                                    </span>
-                                                </button>
-                                            </div>
+                                <div key={index} className="bg-slate-800/40 border border-slate-700 rounded-xl overflow-hidden">
+                                    <div onClick={() => toggleGroup(index)} className="flex items-center gap-3 p-4 cursor-pointer hover:bg-slate-800 transition-colors select-none">
+                                        <div className="w-1 h-8 bg-blue-500 rounded-full"></div>
+                                        <div className="flex-1 min-w-0">
+                                            <h3 className="text-white font-bold text-lg leading-tight">{data.parent.description}</h3>
+                                            <button onClick={(e)=>{e.stopPropagation(); onScan(data.parent.component, data.parent.description)}} className="mt-1 inline-flex items-center gap-2 bg-blue-500/10 text-blue-300 border border-blue-500/20 px-2 py-0.5 rounded text-sm font-mono hover:bg-blue-500 hover:text-white transition-colors">
+                                                <Icon name="Scan" size={14}/> {data.parent.component}
+                                            </button>
                                         </div>
-                                        
-                                        <div className="flex items-center justify-between sm:justify-end gap-4 mt-2 sm:mt-0 pl-4 sm:pl-0 border-t sm:border-t-0 border-slate-800 pt-2 sm:pt-0">
-                                            {data.parent.quantity && (
-                                                <span className="bg-slate-800 text-slate-300 font-mono text-sm px-3 py-1 rounded">
-                                                    {data.parent.quantity}
-                                                </span>
-                                            )}
-                                            <div className={`text-slate-500 transition-transform duration-300 p-2 bg-slate-900 rounded-full ${isOpen ? 'rotate-180' : ''}`}>
-                                                <Icons.ChevronDown />
-                                            </div>
+                                        <div className="text-right">
+                                            {data.parent.quantity && <div className="text-xs text-slate-400">Unit: {data.parent.quantity}</div>}
+                                            <div className="text-emerald-400 font-bold font-mono text-sm">{calcQty(data.parent.quantity)}</div>
                                         </div>
+                                        <Icon name="ChevronDown" className={`text-slate-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
                                     </div>
-
+                                    
                                     {isOpen && (
-                                        <div className="p-3 pt-0 border-t border-slate-800/50 bg-black/20">
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-                                                {data.children.map((child, cIdx) => {
-                                                    const style = getComponentType(child.description);
-                                                    return (
-                                                        <div 
-                                                            key={cIdx} 
-                                                            className={`p-3 rounded-lg border flex items-start gap-3 hover:brightness-110 transition-all ${style.bg}`}
-                                                        >
-                                                            <div className={`p-2 rounded-full bg-[#0f172a]/50 flex-shrink-0 ${style.color}`}>
-                                                                {style.icon}
+                                        <div className="border-t border-slate-700 bg-black/20 p-3 grid gap-3 sm:grid-cols-2">
+                                            {data.children.map((child, i) => {
+                                                const style = getComponentType(child.description);
+                                                return (
+                                                    <div key={i} className={`p-3 rounded-lg border flex items-start gap-3 ${style.bg}`}>
+                                                        <div className={`w-3 h-3 rounded-full mt-1.5 ${style.color.replace('text', 'bg')}`}></div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex justify-between">
+                                                                <span className={`text-[10px] font-bold uppercase ${style.color}`}>{style.type}</span>
+                                                                <span className="text-[10px] text-slate-400">Total: <span className="text-white font-bold">{calcQty(child.quantity)}</span></span>
                                                             </div>
-                                                            <div className="flex-1 min-w-0">
-                                                                <div className="flex justify-between items-start">
-                                                                    <div className={`text-[10px] font-bold uppercase tracking-wider mb-0.5 ${style.color}`}>{style.type}</div>
-                                                                    {child.quantity && <span className="text-[10px] bg-black/30 text-white px-1.5 py-0.5 rounded">{child.quantity}</span>}
-                                                                </div>
-                                                                <h4 className="text-slate-200 font-medium text-sm leading-snug break-words mb-2">{child.description}</h4>
-                                                                <button 
-                                                                    onClick={() => onScan(child.component, child.description)}
-                                                                    className="flex items-center gap-2 bg-black/20 hover:bg-black/40 px-2 py-1.5 rounded text-xs font-mono text-slate-300 transition-colors w-full sm:w-auto justify-center sm:justify-start"
-                                                                >
-                                                                    <Icons.Scan />
-                                                                    <span className="underline decoration-dotted decoration-slate-500 underline-offset-2">{child.component}</span>
-                                                                </button>
-                                                            </div>
+                                                            <div className="text-slate-200 font-medium text-sm leading-tight my-1">{child.description}</div>
+                                                            <button onClick={() => onScan(child.component, child.description)} className="text-xs font-mono text-slate-400 hover:text-white flex items-center gap-1">
+                                                                <Icon name="Scan" size={12}/> {child.component}
+                                                            </button>
                                                         </div>
-                                                    );
-                                                })}
-                                                {data.children.length === 0 && (
-                                                    <div className="text-slate-600 text-sm italic p-2">No Level 2 components listed.</div>
-                                                )}
-                                            </div>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
                                     )}
                                 </div>
                             );
                         })}
-                        {filteredGroups.length === 0 && (
-                            <div className="text-center text-slate-500 mt-10">No parts found matching "{localSearch}"</div>
-                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const Dashboard = ({ kits, jobs, setJobs, onOpenJob }) => {
+            const [isModalOpen, setModalOpen] = useState(false);
+            const [machineFilter, setMachineFilter] = useState("all"); 
+
+            const handleCreate = (newJob) => {
+                const job = { id: Date.now(), status: 'planned', ...newJob };
+                const updated = [...jobs, job];
+                setJobs(updated);
+                localStorage.setItem(STORAGE_JOBS_KEY, JSON.stringify(updated));
+            };
+
+            const handleAction = (id, action) => {
+                let updated = [...jobs];
+                if (action === 'delete') updated = updated.filter(j => j.id !== id);
+                else if (action === 'start') updated = updated.map(j => j.id === id ? { ...j, status: 'running' } : j);
+                else if (action === 'finish') updated = updated.map(j => j.id === id ? { ...j, status: 'done' } : j);
+                else if (action === 'open') { onOpenJob(jobs.find(j => j.id === id)); return; }
+                setJobs(updated);
+                localStorage.setItem(STORAGE_JOBS_KEY, JSON.stringify(updated));
+            };
+
+            const filteredJobs = jobs.filter(j => machineFilter === 'all' || j.machine === machineFilter);
+            const planned = filteredJobs.filter(j => j.status === 'planned');
+            const running = filteredJobs.filter(j => j.status === 'running');
+            const done = filteredJobs.filter(j => j.status === 'done');
+
+            return (
+                <div className="h-screen flex flex-col p-4 sm:p-6 overflow-hidden">
+                    <header className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
+                        <div>
+                            <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-teal-400">FillMaster</h1>
+                            <p className="text-slate-400 text-sm">Production Dashboard</p>
+                        </div>
+                        <div className="flex gap-2">
+                            {/* GÉP SZŰRŐ GOMBOK */}
+                            <div className="bg-slate-800 p-1 rounded-lg flex gap-1 mr-2">
+                                <button onClick={() => setMachineFilter('all')} className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${machineFilter === 'all' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}>ALL</button>
+                                {MACHINES.map(m => (
+                                     <button key={m.id} onClick={() => setMachineFilter(m.id)} className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${machineFilter === m.id ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}>{m.id}</button>
+                                ))}
+                            </div>
+
+                            <a href={SHEET_URL} target="_blank" className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors flex items-center"><Icon name="LayoutDashboard"/></a>
+                            <button onClick={() => setModalOpen(true)} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold shadow-lg shadow-blue-900/20 transition-transform active:scale-95">
+                                <Icon name="Plus" size={18}/> New Plan
+                            </button>
+                        </div>
+                    </header>
+
+                    <div className="flex-1 overflow-x-auto pb-4">
+                        <div className="flex h-full gap-4 min-w-[900px]">
+                            <KanbanColumn title="Planned" icon="Calendar" color="border-slate-500" jobs={planned} status="planned" onAction={handleAction} />
+                            <KanbanColumn title="Running" icon="Play" color="border-blue-500" jobs={running} status="running" onAction={handleAction} />
+                            <KanbanColumn title="Finished" icon="Check" color="border-emerald-500" jobs={done} status="done" onAction={handleAction} />
+                        </div>
+                    </div>
+                    <CreateJobModal isOpen={isModalOpen} onClose={() => setModalOpen(false)} kits={kits} onCreate={handleCreate} />
+                </div>
+            );
+        };
+
+        const BarcodeModal = ({ isOpen, onClose, code, title }) => {
+            const canvasRef = useRef(null);
+            useEffect(() => {
+                if (isOpen && code && canvasRef.current) {
+                    try { bwipjs.toCanvas(canvasRef.current, { bcid: 'datamatrix', text: code.toString(), scale: 3, height: 20, width: 20, padding: 10, backgroundcolor: 'ffffff' }); } catch (e) {}
+                }
+            }, [isOpen, code]);
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-fade-in" onClick={onClose}>
+                    <div className="bg-white text-slate-900 rounded-2xl w-full max-w-sm flex flex-col items-center p-6 relative" onClick={e => e.stopPropagation()}>
+                        <h3 className="font-bold text-lg text-slate-700 mb-4 text-center break-words w-full">{title}</h3>
+                        <canvas ref={canvasRef} className="border-2 border-slate-900 rounded-lg mb-4"></canvas>
+                        <div className="text-3xl font-mono font-bold">{code}</div>
+                        <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-slate-100 rounded-full hover:bg-slate-200"><Icon name="X" size={20}/></button>
                     </div>
                 </div>
             );
         };
 
         const App = () => {
-            const [view, setView] = useState('list');
+            const [view, setView] = useState('dashboard');
             const [kits, setKits] = useState([]);
-            const [selectedKit, setSelectedKit] = useState(null);
-            const [mainSearch, setMainSearch] = useState("");
-            const [isLoading, setIsLoading] = useState(true);
+            const [jobs, setJobs] = useState([]);
+            const [activeJob, setActiveJob] = useState(null);
             const [modalData, setModalData] = useState({ isOpen: false, code: null, title: "" });
 
-            const loadData = async (force = false) => {
-                setIsLoading(true);
-                const cached = localStorage.getItem(CACHE_KEY);
-                
-                if (!force && cached) {
-                    setKits(JSON.parse(cached));
-                    setIsLoading(false);
-                } else {
-                    await fetchFromAPI(true);
-                }
-            };
-
-            const fetchFromAPI = async (shouldUpdateState) => {
-                try {
-                    const res = await fetch(API_URL);
-                    const data = await res.json();
-                    if (shouldUpdateState) setKits(data);
-                    localStorage.setItem(CACHE_KEY, JSON.stringify(data));
-                } catch (e) { 
-                    console.error("Fetch Error:", e);
-                    alert("Hiba az adatbázis frissítésekor. Ellenőrizd az internetkapcsolatot.");
-                } finally { 
-                    if (shouldUpdateState) setIsLoading(false); 
-                }
-            };
-
             useEffect(() => {
-                if(API_URL) loadData();
+                const cachedData = localStorage.getItem(STORAGE_DATA_KEY);
+                if (cachedData) setKits(JSON.parse(cachedData));
+                fetch(API_URL).then(r => r.json()).then(data => {
+                    setKits(data);
+                    localStorage.setItem(STORAGE_DATA_KEY, JSON.stringify(data));
+                }).catch(e => console.error("API Error", e));
+
+                const cachedJobs = localStorage.getItem(STORAGE_JOBS_KEY);
+                if (cachedJobs) setJobs(JSON.parse(cachedJobs));
             }, []);
+
+            const handleOpenJob = (job) => {
+                const kit = kits.find(k => k.kitName === job.kitName);
+                if (kit) { setActiveJob({ job, kit }); setView('bom'); } 
+                else { alert("Kit data not found!"); }
+            };
 
             return (
                 <>
-                    {view === 'list' && (
-                        <KitSelectionView 
-                            kits={kits} 
-                            isLoading={isLoading}
-                            searchTerm={mainSearch}
-                            setSearchTerm={setMainSearch}
-                            onSelectKit={(kit) => { setSelectedKit(kit); setView('detail'); }}
-                            onRefresh={loadData}
-                        />
-                    )}
-
-                    {view === 'detail' && selectedKit && (
-                        <BOMView 
-                            kit={selectedKit} 
-                            onBack={() => setView('list')} 
-                            onScan={(c, t) => setModalData({ isOpen: true, code: c, title: t })}
-                        />
-                    )}
-
-                    <BarcodeModal 
-                        isOpen={modalData.isOpen} 
-                        code={modalData.code} 
-                        title={modalData.title} 
-                        onClose={() => setModalData({ ...modalData, isOpen: false })} 
-                    />
+                    {view === 'dashboard' && <Dashboard kits={kits} jobs={jobs} setJobs={setJobs} onOpenJob={handleOpenJob} />}
+                    {view === 'bom' && activeJob && <BOMView kit={activeJob.kit} job={activeJob.job} onBack={() => setView('dashboard')} onScan={(c, t) => setModalData({ isOpen: true, code: c, title: t })} />}
+                    <BarcodeModal isOpen={modalData.isOpen} code={modalData.code} title={modalData.title} onClose={() => setModalData({ ...modalData, isOpen: false })} />
                 </>
             );
         };
@@ -441,13 +454,8 @@
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
 
-        // --- PWA SERVICE WORKER REGISZTRÁCIÓ ---
         if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js')
-                    .then(reg => console.log('Service Worker Registered!', reg.scope))
-                    .catch(err => console.log('Service Worker Failed:', err));
-            });
+            window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(console.error));
         }
     </script>
 </body>
