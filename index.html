@@ -4,11 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#0f172a">
-    <title>FillMaster - Production Dashboard</title>
+    <title>FillMaster - DEBUG MODE</title>
     
     <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/1048/1048953.png">
-
+    
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -19,470 +18,154 @@
     <script src="config.js"></script>
 
     <style>
-        body { background-color: #0f172a; color: #e2e8f0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .glass-panel { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37); }
-        .glass-card { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05); transition: all 0.2s; }
-        .glass-card:hover { background: rgba(255, 255, 255, 0.07); transform: translateY(-2px); border-color: rgba(255, 255, 255, 0.2); }
-        .animate-fade-in { animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        body { background-color: #0f172a; color: #e2e8f0; font-family: sans-serif; }
         .spinner { border: 4px solid rgba(255,255,255,0.1); width: 36px; height: 36px; border-radius: 50%; border-left-color: #3b82f6; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        /* Debug Console stílus */
+        #debug-console { position: fixed; bottom: 0; left: 0; width: 100%; height: 150px; background: rgba(0,0,0,0.9); color: #00ff00; font-family: monospace; font-size: 12px; overflow-y: auto; z-index: 9999; padding: 10px; border-top: 2px solid #333; }
+        .log-error { color: #ff5555; }
+        .log-warn { color: #ffff55; }
+        .log-info { color: #aaaaff; }
     </style>
 </head>
 <body>
     <div id="root"></div>
+    <div id="debug-console">Waiting for logs...</div>
+
+    <script>
+        // --- DEBUG LOGGER ---
+        // Ez a szkript elfogja a konzol üzeneteket és kiteszi a képernyőre
+        (function(){
+            var oldLog = console.log;
+            var oldError = console.error;
+            var consoleDiv = document.getElementById('debug-console');
+
+            function appendLog(msg, type) {
+                var div = document.createElement('div');
+                div.textContent = "> " + msg;
+                div.className = type;
+                consoleDiv.appendChild(div);
+                consoleDiv.scrollTop = consoleDiv.scrollHeight;
+            }
+
+            console.log = function (message) {
+                appendLog(message, 'log-info');
+                oldLog.apply(console, arguments);
+            };
+            console.error = function (message) {
+                appendLog(message, 'log-error');
+                oldError.apply(console, arguments);
+            };
+            
+            window.onerror = function(msg, url, line, col, error) {
+               appendLog("GLOBAL ERROR: " + msg + " (Line: " + line + ")", 'log-error');
+               return false;
+            };
+        })();
+    </script>
 
     <script type="text/babel">
         const { useState, useEffect, useMemo, useRef } = React;
         
-        // --- KONFIGURÁCIÓ BEOLVASÁSA (Fallback értékekkel) ---
+        // --- KONFIGURÁCIÓ ELLENŐRZÉSE ---
         const CONFIG = window.APP_CONFIG || {};
         const API_URL = CONFIG.API_URL || "";
-        const SHEET_URL = CONFIG.SHEET_URL || "#";
-        const MACHINES = CONFIG.MACHINES || [{ id: 'M1', name: 'Machine 1' }, { id: 'M2', name: 'Machine 2' }];
-        const FORMATS = CONFIG.FORMATS || [{ id: 'F1', name: 'Standard Format', color: 'bg-gray-500' }];
+        
+        console.log("Config loaded. API_URL length: " + API_URL.length);
+        if(!API_URL) console.error("HIBA: API_URL hiányzik a config.js-ből!");
 
-        const STORAGE_JOBS_KEY = 'fillmaster_jobs_v2';
-        const STORAGE_DATA_KEY = 'fillmaster_data_v10';
+        // --- DEFINITIONS (Minimalizált a debug miatt) ---
+        const MACHINES = CONFIG.MACHINES || [{id:'M1',name:'Machine 1'},{id:'M2',name:'Machine 2'}];
+        const FORMATS = CONFIG.FORMATS || [{id:'F1',name:'Format 1',color:'bg-gray-500'}];
+        
+        // --- ICONS (Egyszerűsített) ---
+        const Icon = ({ name, size=20 }) => <span style={{fontSize: size}}>📦</span>;
 
-        // --- ICONS ---
-        const Icon = ({ name, size = 20, className = "" }) => {
-            const icons = {
-                LayoutDashboard: <path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z" />,
-                List: <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>,
-                Plus: <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>,
-                Play: <polygon points="5 3 19 12 5 21 5 3"/>,
-                Check: <polyline points="20 6 9 17 4 12"/>,
-                Clock: <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>,
-                Calendar: <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>,
-                Search: <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>,
-                ArrowLeft: <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>,
-                Scan: <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="10" height="10"/>,
-                Trash: <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>,
-                ChevronDown: <polyline points="6 9 12 15 18 9"/>,
-                X: <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>,
-                Refresh: <path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-            };
-            return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{icons[name] || icons.List}</svg>;
-        };
-
-        const parseKitName = (fullName) => {
-            if(!fullName) return { name: "Unknown", code: "" };
-            const lastDashIndex = fullName.lastIndexOf('-');
-            if (lastDashIndex === -1) return { name: fullName, code: "" };
-            return { name: fullName.substring(0, lastDashIndex).trim(), code: fullName.substring(lastDashIndex + 1).trim() };
-        };
-
-        const getComponentType = (desc) => {
-            const d = desc ? desc.toLowerCase() : "";
-            if (d.includes('cap') || d.includes('deckel')) {
-                let colorClass = 'text-slate-400'; let bgClass = 'bg-slate-500/10 border-slate-500/30';
-                if (d.includes('red') || d.includes('rot')) { colorClass = 'text-red-500'; bgClass = 'bg-red-500/10 border-red-500/30'; }
-                else if (d.includes('blue') || d.includes('blau')) { colorClass = 'text-blue-500'; bgClass = 'bg-blue-500/10 border-blue-500/30'; }
-                else if (d.includes('green') || d.includes('grün')) { colorClass = 'text-green-500'; bgClass = 'bg-green-500/10 border-green-500/30'; }
-                else if (d.includes('yellow') || d.includes('gelb')) { colorClass = 'text-yellow-400'; bgClass = 'bg-yellow-500/10 border-yellow-500/30'; }
-                else if (d.includes('white') || d.includes('weiss')) { colorClass = 'text-white'; bgClass = 'bg-white/10 border-white/30'; }
-                else if (d.includes('black') || d.includes('schwarz')) { colorClass = 'text-slate-300'; bgClass = 'bg-slate-700 border-slate-600'; }
-                else if (d.includes('orange')) { colorClass = 'text-orange-500'; bgClass = 'bg-orange-500/10 border-orange-500/30'; }
-                return { type: 'Cap', icon: 'Cap', color: colorClass, bg: bgClass };
-            }
-            if (d.includes('btl') || d.includes('bottle')) return { type: 'Bottle', icon: 'Bottle', color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/30' };
-            if (d.includes('label')) return { type: 'Label', icon: 'Label', color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/30' };
-            return { type: 'Other', icon: 'Box', color: 'text-slate-400', bg: 'bg-slate-800/50 border-slate-700' };
-        };
-
-        // --- COMPONENTS ---
-
-        const CreateJobModal = ({ isOpen, onClose, kits, onCreate }) => {
-            const [selectedKit, setSelectedKit] = useState("");
-            const [quantity, setQuantity] = useState(1000);
-            const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-            const [machine, setMachine] = useState(MACHINES[0]?.id || "");
-            const [format, setFormat] = useState(FORMATS[0]?.id || "");
-            
-            if (!isOpen) return null;
-
-            return (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
-                    <div className="bg-slate-900 border border-slate-700 w-full max-w-lg rounded-2xl p-6 shadow-2xl relative">
-                        <h2 className="text-xl font-bold text-white mb-4">Create Production Plan</h2>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm text-slate-400 mb-1">Select Kit</label>
-                                <select className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white focus:border-blue-500 outline-none" value={selectedKit} onChange={e => setSelectedKit(e.target.value)}>
-                                    <option value="">-- Choose a Kit --</option>
-                                    {kits.map((k, i) => <option key={i} value={k.kitName}>{k.kitName}</option>)}
-                                </select>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm text-slate-400 mb-1">Target Machine</label>
-                                    <select className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white focus:border-blue-500 outline-none" value={machine} onChange={e => setMachine(e.target.value)}>
-                                        {MACHINES.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm text-slate-400 mb-1">Format Set</label>
-                                    <select className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white focus:border-blue-500 outline-none" value={format} onChange={e => setFormat(e.target.value)}>
-                                        {FORMATS.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-                                    </select>
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm text-slate-400 mb-1">Quantity (pcs)</label>
-                                    <input type="number" value={quantity} onChange={e => setQuantity(e.target.value)} className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white" />
-                                </div>
-                                <div>
-                                    <label className="block text-sm text-slate-400 mb-1">Date</label>
-                                    <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-slate-800 border border-slate-600 rounded-lg p-3 text-white" />
-                                </div>
-                            </div>
-                        </div>
-                        <div className="flex gap-3 mt-8">
-                            <button onClick={onClose} className="flex-1 py-3 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 font-medium">Cancel</button>
-                            <button onClick={() => { if(selectedKit) { onCreate({ kitName: selectedKit, quantity, date, machine, format }); onClose(); }}} className="flex-1 py-3 rounded-xl bg-blue-600 text-white hover:bg-blue-500 font-bold shadow-lg shadow-blue-900/20">Create Plan</button>
-                        </div>
-                    </div>
-                </div>
-            );
-        };
-
-        const KanbanColumn = ({ title, icon, color, jobs, onAction, status }) => (
-            <div className="flex flex-col h-full min-w-[280px] sm:min-w-[340px] bg-slate-900/30 rounded-2xl p-3 border border-slate-800/50">
-                <div className={`flex items-center gap-2 p-3 mb-2 border-b-2 ${color} border-opacity-30`}>
-                    <Icon name={icon} className="text-slate-400" />
-                    <h3 className="font-bold text-slate-200 uppercase tracking-wide text-sm">{title}</h3>
-                    <span className="ml-auto bg-slate-800 text-xs px-2 py-1 rounded-full text-slate-400">{jobs.length}</span>
-                </div>
-                <div className="flex-1 overflow-y-auto space-y-3 p-1 custom-scrollbar">
-                    {jobs.map(job => {
-                        const { name, code } = parseKitName(job.kitName);
-                        const formatObj = FORMATS.find(f => f.id === job.format) || FORMATS[0];
-                        const machineObj = MACHINES.find(m => m.id === job.machine) || MACHINES[0];
-
-                        return (
-                            <div key={job.id} className="glass-card p-4 rounded-xl relative group flex flex-col gap-2">
-                                <div className="flex justify-between items-start">
-                                    <div className="flex gap-2">
-                                        <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">{job.date}</span>
-                                        <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${machineObj.id === 'M1' ? 'bg-blue-900/30 text-blue-300 border-blue-500/30' : 'bg-orange-900/30 text-orange-300 border-orange-500/30'}`}>
-                                            {machineObj.id}
-                                        </span>
-                                    </div>
-                                    {status === 'planned' && <button onClick={() => onAction(job.id, 'delete')} className="text-slate-600 hover:text-red-400"><Icon name="Trash" size={14}/></button>}
-                                </div>
-                                <div>
-                                    <h4 className="font-bold text-slate-200 leading-tight text-sm">{name}</h4>
-                                    <div className="text-[10px] font-mono font-bold text-cyan-400 mt-0.5">{code}</div>
-                                </div>
-                                <div className={`text-[10px] font-bold px-2 py-1 rounded border w-fit ${formatObj.color}`}>
-                                    <span className="opacity-75 mr-1">SET:</span> {formatObj.name}
-                                </div>
-                                <div className="flex justify-between items-end mt-1 pt-2 border-t border-slate-800">
-                                    <div className="text-sm text-slate-400">Qty: <b className="text-white">{job.quantity}</b></div>
-                                    {status === 'planned' && (
-                                        <button onClick={() => onAction(job.id, 'start')} className="bg-blue-600 hover:bg-blue-500 text-white p-1.5 px-3 rounded-lg text-xs font-bold shadow-lg transition-transform active:scale-95 flex items-center gap-1"><Icon name="Play" size={12}/> Start</button>
-                                    )}
-                                    {status === 'running' && (
-                                        <div className="flex gap-2">
-                                            <button onClick={() => onAction(job.id, 'open')} className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg"><Icon name="List" size={16}/></button>
-                                            <button onClick={() => onAction(job.id, 'finish')} className="bg-emerald-600 hover:bg-emerald-500 text-white p-2 rounded-lg"><Icon name="Check" size={16}/></button>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        );
-                    })}
-                    {jobs.length === 0 && <div className="text-center py-10 text-slate-600 italic text-sm">No jobs here</div>}
-                </div>
+        // --- LOADING SCREEN ---
+        const LoadingScreen = ({ error }) => (
+            <div className="fixed inset-0 z-40 flex flex-col items-center justify-center bg-[#0f172a] p-4 text-center">
+                {!error && <div className="spinner mb-4"></div>}
+                <h2 className="text-white font-bold text-xl">{error ? "Error Occurred" : "System Loading..."}</h2>
+                <p className={error ? "text-red-400 mt-2 font-mono bg-black/50 p-2 rounded" : "text-slate-400 text-sm mt-2"}>
+                    {error || "Connecting to Google Database..."}
+                </p>
+                {error && <button onClick={() => window.location.reload()} className="mt-4 bg-blue-600 text-white px-4 py-2 rounded">Retry</button>}
             </div>
         );
 
-        const BOMView = ({ kit, job, onBack, onScan }) => {
-            const [localSearch, setLocalSearch] = useState("");
-            const [expandedGroups, setExpandedGroups] = useState({});
-            const toggleGroup = (index) => setExpandedGroups(p => ({ ...p, [index]: !p[index] }));
-            
-            const calcQty = (baseQty) => {
-                if(!baseQty) return "";
-                const match = baseQty.toString().match(/([\d\.]+)\s*([a-zA-Z]+)/);
-                if(match) {
-                    const val = parseFloat(match[1]);
-                    const unit = match[2];
-                    const total = (val * job.quantity).toFixed(2);
-                    return `${total} ${unit}`; 
-                }
-                return baseQty;
-            };
-
-            const groupedBOM = useMemo(() => {
-                const groups = [];
-                let currentGroup = null;
-                kit.bom.forEach(item => {
-                    if (item.level > 2) return;
-                    if (item.level == 1) {
-                        currentGroup = { parent: item, children: [] };
-                        groups.push(currentGroup);
-                    } else if (currentGroup && item.level == 2) {
-                        currentGroup.children.push(item);
-                    } else if (!currentGroup) {
-                        currentGroup = { parent: { description: "General", component: "", quantity: "" }, children: [item] };
-                        groups.push(currentGroup);
-                    }
-                });
-                return groups;
-            }, [kit]);
-
-            const filteredGroups = groupedBOM.map((group, idx) => {
-                const term = localSearch.toLowerCase();
-                const pMatch = group.parent.description.toLowerCase().includes(term) || group.parent.component.toString().includes(term);
-                if (pMatch) return { data: group, index: idx };
-                const fChildren = group.children.filter(c => c.description.toLowerCase().includes(term) || c.component.toString().includes(term));
-                return fChildren.length ? { data: { ...group, children: fChildren }, index: idx } : null;
-            }).filter(Boolean);
-
-            const { name, code } = parseKitName(kit.kitName);
-            const formatObj = FORMATS.find(f => f.id === job.format) || FORMATS[0];
-
-            return (
-                <div className="h-screen flex flex-col bg-[#0f172a]">
-                    <div className="bg-slate-900 border-b border-slate-700 p-4 sticky top-0 z-20 shadow-xl">
-                        <div className="flex justify-between items-start mb-2">
-                            <button onClick={onBack} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
-                                <Icon name="ArrowLeft" /> <span className="text-sm font-bold uppercase">Dashboard</span>
-                            </button>
-                            <div className="text-right">
-                                <span className="text-xs text-slate-500 uppercase tracking-widest block">Running on {job.machine}</span>
-                                <span className={`text-xs font-bold px-2 py-0.5 rounded border ${formatObj.color}`}>{formatObj.name}</span>
-                            </div>
-                        </div>
-                        <h2 className="text-2xl font-bold text-white leading-tight">{name}</h2>
-                        <div className="text-cyan-400 font-mono font-bold mb-4">{code}</div>
-                        <div className="relative">
-                            <div className="absolute left-3 top-2.5 text-slate-500"><Icon name="Search" /></div>
-                            <input type="text" placeholder="Search part..." className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2 pl-10 pr-3 text-white focus:outline-none focus:border-blue-500" value={localSearch} onChange={e => setLocalSearch(e.target.value)} />
-                        </div>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-20 custom-scrollbar">
-                        {filteredGroups.map(({ data, index }) => {
-                            const isOpen = expandedGroups[index] || localSearch.length > 0;
-                            return (
-                                <div key={index} className="bg-slate-800/40 border border-slate-700 rounded-xl overflow-hidden">
-                                    <div onClick={() => toggleGroup(index)} className="flex items-center gap-3 p-4 cursor-pointer hover:bg-slate-800 transition-colors select-none">
-                                        <div className="w-1 h-8 bg-blue-500 rounded-full"></div>
-                                        <div className="flex-1 min-w-0">
-                                            <h3 className="text-white font-bold text-lg leading-tight">{data.parent.description}</h3>
-                                            <button onClick={(e)=>{e.stopPropagation(); onScan(data.parent.component, data.parent.description)}} className="mt-1 inline-flex items-center gap-2 bg-blue-500/10 text-blue-300 border border-blue-500/20 px-2 py-0.5 rounded text-sm font-mono hover:bg-blue-500 hover:text-white transition-colors">
-                                                <Icon name="Scan" size={14}/> {data.parent.component}
-                                            </button>
-                                        </div>
-                                        <div className="text-right">
-                                            {data.parent.quantity && <div className="text-xs text-slate-400">Unit: {data.parent.quantity}</div>}
-                                            <div className="text-emerald-400 font-bold font-mono text-sm">{calcQty(data.parent.quantity)}</div>
-                                        </div>
-                                        <Icon name="ChevronDown" className={`text-slate-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-                                    </div>
-                                    {isOpen && (
-                                        <div className="border-t border-slate-700 bg-black/20 p-3 grid gap-3 sm:grid-cols-2">
-                                            {data.children.map((child, i) => {
-                                                const style = getComponentType(child.description);
-                                                return (
-                                                    <div key={i} className={`p-3 rounded-lg border flex items-start gap-3 ${style.bg}`}>
-                                                        <div className={`w-3 h-3 rounded-full mt-1.5 ${style.color.replace('text', 'bg')}`}></div>
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="flex justify-between">
-                                                                <span className={`text-[10px] font-bold uppercase ${style.color}`}>{style.type}</span>
-                                                                <span className="text-[10px] text-slate-400">Total: <span className="text-white font-bold">{calcQty(child.quantity)}</span></span>
-                                                            </div>
-                                                            <div className="text-slate-200 font-medium text-sm leading-tight my-1">{child.description}</div>
-                                                            <button onClick={() => onScan(child.component, child.description)} className="text-xs font-mono text-slate-400 hover:text-white flex items-center gap-1">
-                                                                <Icon name="Scan" size={12}/> {child.component}
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
-            );
-        };
-
-        const Dashboard = ({ kits, jobs, setJobs, onOpenJob, onRefresh }) => {
-            const [isModalOpen, setModalOpen] = useState(false);
-            const [machineFilter, setMachineFilter] = useState("all");
-
-            const handleCreate = (newJob) => {
-                const job = { id: Date.now(), status: 'planned', ...newJob };
-                const updated = [...jobs, job];
-                setJobs(updated);
-                localStorage.setItem(STORAGE_JOBS_KEY, JSON.stringify(updated));
-            };
-
-            const handleAction = (id, action) => {
-                let updated = [...jobs];
-                if (action === 'delete') updated = updated.filter(j => j.id !== id);
-                else if (action === 'start') updated = updated.map(j => j.id === id ? { ...j, status: 'running' } : j);
-                else if (action === 'finish') updated = updated.map(j => j.id === id ? { ...j, status: 'done' } : j);
-                else if (action === 'open') { onOpenJob(jobs.find(j => j.id === id)); return; }
-                setJobs(updated);
-                localStorage.setItem(STORAGE_JOBS_KEY, JSON.stringify(updated));
-            };
-
-            const filteredJobs = jobs.filter(j => machineFilter === 'all' || j.machine === machineFilter);
-            const planned = filteredJobs.filter(j => j.status === 'planned');
-            const running = filteredJobs.filter(j => j.status === 'running');
-            const done = filteredJobs.filter(j => j.status === 'done');
-
-            return (
-                <div className="h-screen flex flex-col p-4 sm:p-6 overflow-hidden">
-                    <header className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
-                        <div>
-                            <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-teal-400">FillMaster</h1>
-                            <p className="text-slate-400 text-sm">Production Dashboard</p>
-                        </div>
-                        <div className="flex gap-2 items-center">
-                             <div className="bg-slate-800 p-1 rounded-lg flex gap-1 mr-2">
-                                <button onClick={() => setMachineFilter('all')} className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${machineFilter === 'all' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}>ALL</button>
-                                {MACHINES.map(m => (
-                                     <button key={m.id} onClick={() => setMachineFilter(m.id)} className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${machineFilter === m.id ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}>{m.id}</button>
-                                ))}
-                            </div>
-                            <button onClick={onRefresh} className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors" title="Reload Database"><Icon name="Refresh"/></button>
-                            <a href={SHEET_URL} target="_blank" className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors flex items-center"><Icon name="LayoutDashboard"/></a>
-                            <button onClick={() => setModalOpen(true)} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold shadow-lg shadow-blue-900/20 transition-transform active:scale-95">
-                                <Icon name="Plus" size={18}/> New Plan
-                            </button>
-                        </div>
-                    </header>
-                    <div className="flex-1 overflow-x-auto pb-4">
-                        <div className="flex h-full gap-4 min-w-[900px]">
-                            <KanbanColumn title="Planned" icon="Calendar" color="border-slate-500" jobs={planned} status="planned" onAction={handleAction} />
-                            <KanbanColumn title="Running" icon="Play" color="border-blue-500" jobs={running} status="running" onAction={handleAction} />
-                            <KanbanColumn title="Finished" icon="Check" color="border-emerald-500" jobs={done} status="done" onAction={handleAction} />
-                        </div>
-                    </div>
-                    <CreateJobModal isOpen={isModalOpen} onClose={() => setModalOpen(false)} kits={kits} onCreate={handleCreate} />
-                </div>
-            );
-        };
-
-        const BarcodeModal = ({ isOpen, onClose, code, title }) => {
-            const canvasRef = useRef(null);
-            useEffect(() => {
-                if (isOpen && code && canvasRef.current) {
-                    try { bwipjs.toCanvas(canvasRef.current, { bcid: 'datamatrix', text: code.toString(), scale: 3, height: 20, width: 20, padding: 10, backgroundcolor: 'ffffff' }); } catch (e) {}
-                }
-            }, [isOpen, code]);
-            if (!isOpen) return null;
-            return (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-fade-in" onClick={onClose}>
-                    <div className="bg-white text-slate-900 rounded-2xl w-full max-w-sm flex flex-col items-center p-6 relative" onClick={e => e.stopPropagation()}>
-                        <h3 className="font-bold text-lg text-slate-700 mb-4 text-center break-words w-full">{title}</h3>
-                        <canvas ref={canvasRef} className="border-2 border-slate-900 rounded-lg mb-4"></canvas>
-                        <div className="text-3xl font-mono font-bold">{code}</div>
-                        <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-slate-100 rounded-full hover:bg-slate-200"><Icon name="X" size={20}/></button>
-                    </div>
-                </div>
-            );
-        };
-
-        // --- LOADING SCREEN COMPONENT ---
-        const LoadingScreen = () => (
-            <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0f172a]">
-                <div className="spinner mb-4"></div>
-                <h2 className="text-white font-bold text-xl">System Loading...</h2>
-                <p className="text-slate-400 text-sm mt-2">Connecting to database</p>
-            </div>
-        );
-
+        // --- MAIN APP ---
         const App = () => {
-            const [view, setView] = useState('dashboard');
             const [kits, setKits] = useState([]);
-            const [jobs, setJobs] = useState([]);
-            const [activeJob, setActiveJob] = useState(null);
-            const [modalData, setModalData] = useState({ isOpen: false, code: null, title: "" });
-            const [isLoading, setIsLoading] = useState(true);
-
-            const loadData = async () => {
-                setIsLoading(true);
-                const cachedData = localStorage.getItem(STORAGE_DATA_KEY);
-                
-                // 1. Load from cache first (if exists)
-                if (cachedData) {
-                    setKits(JSON.parse(cachedData));
-                    // If we have cache, we can remove loading screen immediately, but still fetch in background
-                    setIsLoading(false);
-                }
-
-                // 2. Fetch from API
-                try {
-                    const r = await fetch(API_URL);
-                    if (!r.ok) throw new Error("HTTP " + r.status);
-                    const data = await r.json();
-                    
-                    if (Array.isArray(data)) {
-                        setKits(data);
-                        localStorage.setItem(STORAGE_DATA_KEY, JSON.stringify(data));
-                    } else {
-                        throw new Error("Invalid Data Format");
-                    }
-                } catch (e) {
-                    console.error("API Error", e);
-                    // Only alert if we have NO data at all (neither cache nor new)
-                    if (!cachedData) {
-                        alert("Hiba: Nem sikerült betölteni az adatokat. Ellenőrizd a Google Script jogosultságokat (Anyone)!");
-                    }
-                } finally {
-                    setIsLoading(false);
-                }
-            };
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
 
             useEffect(() => {
-                const cachedJobs = localStorage.getItem(STORAGE_JOBS_KEY);
-                if (cachedJobs) setJobs(JSON.parse(cachedJobs));
-                
-                if (API_URL) loadData();
-                else {
-                    alert("HIBA: Nincs API URL konfigurálva (config.js)!");
-                    setIsLoading(false);
-                }
+                const fetchData = async () => {
+                    console.log("Starting fetch...");
+                    
+                    try {
+                        if (!API_URL) throw new Error("API URL is missing in config.js");
+
+                        // 10 másodperces időkorlát (Timeout)
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+                        console.log("Fetching from: " + API_URL);
+                        const response = await fetch(API_URL, { 
+                            signal: controller.signal,
+                            method: 'GET',
+                            headers: { 'Content-Type': 'text/plain;charset=utf-8' } // Néha ez segít a CORS-nál
+                        });
+                        
+                        clearTimeout(timeoutId);
+                        
+                        console.log("Response status: " + response.status);
+                        if (!response.ok) throw new Error("HTTP Status: " + response.status);
+
+                        const text = await response.text();
+                        console.log("Data received (first 50 chars): " + text.substring(0, 50));
+                        
+                        const data = JSON.parse(text);
+                        console.log("JSON Parsed successfully. Items: " + data.length);
+                        
+                        setKits(data);
+                        setLoading(false);
+
+                    } catch (err) {
+                        console.error("FETCH ERROR: " + err.message);
+                        if (err.name === 'AbortError') {
+                            setError("Timeout: A szerver nem válaszolt 10mp alatt. Ellenőrizd az internetet.");
+                        } else {
+                            setError(err.message + ". Ellenőrizd a Google Script jogosultságokat (Anyone)!");
+                        }
+                        setLoading(false); // Leállítjuk a töltést, hogy látszódjon a hiba
+                    }
+                };
+
+                fetchData();
             }, []);
 
-            const handleOpenJob = (job) => {
-                const kit = kits.find(k => k.kitName === job.kitName);
-                if (kit) { setActiveJob({ job, kit }); setView('bom'); } 
-                else { alert("Kit data not found!"); }
-            };
-
-            if (isLoading && kits.length === 0) {
-                return <LoadingScreen />;
+            if (loading || error) {
+                return <LoadingScreen error={error} />;
             }
 
             return (
-                <>
-                    {view === 'dashboard' && <Dashboard kits={kits} jobs={jobs} setJobs={setJobs} onOpenJob={handleOpenJob} onRefresh={loadData} />}
-                    {view === 'bom' && activeJob && <BOMView kit={activeJob.kit} job={activeJob.job} onBack={() => setView('dashboard')} onScan={(c, t) => setModalData({ isOpen: true, code: c, title: t })} />}
-                    <BarcodeModal isOpen={modalData.isOpen} code={modalData.code} title={modalData.title} onClose={() => setModalData({ ...modalData, isOpen: false })} />
-                </>
+                <div className="p-10 text-center">
+                    <h1 className="text-3xl font-bold text-green-500 mb-4">Sikeres betöltés!</h1>
+                    <p className="text-white">Betöltött Kit-ek száma: {kits.length}</p>
+                    <p className="text-slate-400 mt-4">Ha ezt látod, az adatbázis kapcsolat működik. Most visszaállíthatod az eredeti kódot.</p>
+                    <div className="mt-8 text-left max-w-md mx-auto bg-slate-800 p-4 rounded">
+                        <h3 className="text-white font-bold">Adatok:</h3>
+                        <pre className="text-xs text-green-400 overflow-auto h-64">
+                            {JSON.stringify(kits, null, 2)}
+                        </pre>
+                    </div>
+                </div>
             );
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
-
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(console.error));
-        }
     </script>
 </body>
 </html>
